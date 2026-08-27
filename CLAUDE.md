@@ -1,7 +1,26 @@
 # CLAUDE.md — WebMCP Local Agent
 
-Extensión de Chrome MV3 (JS vanilla, sin build step). Chat con Ollama local +
-ejecución de tools WebMCP de la pestaña activa.
+## Qué es
+
+Extensión de Chrome MV3 que abre un side panel con dos cosas conectadas entre sí:
+
+1. **Inspector WebMCP** — descubre las tools que la pestaña activa registra en
+   `navigator.modelContext` / `window.modelContext` y sabe ejecutarlas.
+2. **Cliente de Ollama local** (`127.0.0.1:11434`) — chat con selector dinámico de
+   modelos descargados y **tool calling**: el modelo llama a las tools de la web,
+   se ejecutan en el DOM y el resultado vuelve al modelo para que redacte la respuesta.
+
+JS vanilla, sin bundler ni dependencias. El "build" (`build.ps1`) solo valida y comprime.
+Todo es local: el único destino de red es Ollama.
+
+## Repo
+
+- Remote: **`https://github.com/molidestroyer/webmcp-local-agent`** (público).
+- ⚠️ La cuenta es **`molidestroyer`**, no `miguelmolinamontilla`. Son dos cuentas
+  distintas de Miguel; la principal (CV y demás repos) y las credenciales guardadas en
+  el Git Credential Manager de esta máquina son las de `molidestroyer`. Empujar a la
+  otra cuenta falla con 403.
+- Publicado: `v0.1.0`, con el zip adjunto en Releases.
 
 ## Estructura
 
