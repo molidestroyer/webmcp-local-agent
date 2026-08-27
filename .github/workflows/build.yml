@@ -1,0 +1,56 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Leer version del manifest
+        id: meta
+        run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Comprobar que el tag coincide con la version del manifest
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="${{ steps.meta.outputs.version }}"
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::El tag v$tag no coincide con manifest.json ($manifest)."
+            exit 1
+          fi
+
+      # build.ps1 es el unico camino de empaquetado: local y CI usan el mismo.
+      - name: Empaquetar
+        shell: pwsh
+        run: ./build.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webmcp-local-agent-${{ steps.meta.outputs.version }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Publicar release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Descarga el zip, descomprímelo y cárgalo en \`chrome://extensions\` con **Cargar descomprimida** (requiere Modo desarrollador). Necesitas [Ollama](https://ollama.com) corriendo en local con un modelo con capacidad \`tools\`."

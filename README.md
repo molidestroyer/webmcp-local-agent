@@ -46,18 +46,54 @@ desplegable pero ignorarán las herramientas. El selector marca con `· tools` l
 
 ## Instalación
 
-1. Clona el repo:
+### Opción A — probarla en otra máquina (zip de la release)
+
+No hace falta clonar nada ni tener node instalado:
+
+1. Descarga el `.zip` de la [última release](https://github.com/molidestroyer/webmcp-local-agent/releases/latest).
+2. Descomprímelo en una carpeta.
+3. `chrome://extensions` → activa **Modo desarrollador** → **Cargar descomprimida** → esa carpeta.
+
+> Chrome no instala `.zip` ni `.crx` de fuera de la Web Store: hay que descomprimir
+> y cargar la carpeta. Es un paso, pero es la única vía sin publicar en la Store.
+
+### Opción B — desde el repo
 
 ```bash
 git clone https://github.com/molidestroyer/webmcp-local-agent.git
 ```
 
-2. Abre `chrome://extensions`, activa **Modo desarrollador**.
-3. **Cargar descomprimida** → selecciona la carpeta del repo.
-4. Ancla el icono ⚡ a la barra y púlsalo: se abre el side panel.
+`chrome://extensions` → **Modo desarrollador** → **Cargar descomprimida** → la carpeta del repo.
+
+Después, ancla el icono ⚡ a la barra y púlsalo: se abre el side panel.
 
 > Tras instalar o recargar la extensión, **refresca (F5) las pestañas ya abiertas**.
 > Los content scripts no se inyectan retroactivamente en páginas que ya estaban cargadas.
+
+---
+
+## Build y distribución
+
+No hay bundler ni dependencias: el "build" solo valida y empaqueta.
+
+```bash
+pwsh ./build.ps1
+```
+
+Genera `dist/webmcp-local-agent-<version>.zip` con `manifest.json` en la raíz —el formato
+que aceptan tanto **Cargar descomprimida** (tras descomprimir) como la Chrome Web Store—.
+Antes de comprimir comprueba la sintaxis de los `.js` con `node --check` y que todos los
+archivos declarados en el manifest existen de verdad.
+
+CI ([`.github/workflows/build.yml`](.github/workflows/build.yml)) ejecuta **ese mismo
+script** en cada push a `main` y sube el zip como artefacto. Para publicar una release:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+El workflow verifica que el tag coincide con la `version` del `manifest.json` (falla si no)
+y crea la release de GitHub con el zip adjunto.
 
 ---
 

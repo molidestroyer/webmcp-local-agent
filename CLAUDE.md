@@ -13,6 +13,8 @@ ejecución de tools WebMCP de la pestaña activa.
 | `background.js` | SW | Mapa `tabId → Port`, enrutado request/response con timeout, `sidePanel.setPanelBehavior`, inyección de rescate vía `scripting.executeScript`. |
 | `sidepanel.{html,css,js}` | panel | UI + ciclo de tool calling contra `/api/chat`. |
 | `demo/webmcp-demo.html` | — | Página de prueba con polyfill de `navigator.modelContext` y 4 tools. |
+| `build.ps1` | — | Valida + empaqueta a `dist/webmcp-local-agent-<version>.zip`. |
+| `.github/workflows/build.yml` | — | CI: ejecuta `build.ps1` (pwsh está preinstalado en `ubuntu-latest`), sube artefacto y publica release en tags `v*`. |
 
 ## Decisiones que conviene no deshacer
 
@@ -49,6 +51,22 @@ ollama serve
 
 `chrome://extensions` → Modo desarrollador → Cargar descomprimida → carpeta del repo.
 Abrir `demo/webmcp-demo.html` y pedir «añade comprar pan».
+
+## Empaquetar y publicar
+
+```bash
+pwsh ./build.ps1
+```
+
+- El zip debe llevar `manifest.json` **en la raíz**, no dentro de una subcarpeta, o Chrome
+  y la Web Store lo rechazan. Por eso se comprime `$staging\*` y no la carpeta.
+- `$include` en `build.ps1` es una lista blanca: **si añades un archivo nuevo que se
+  distribuye, hay que meterlo ahí** o no llegará al zip (el script falla si un archivo
+  listado no existe, pero no avisa de los que faltan por listar).
+- Release: `git tag vX.Y.Z && git push origin vX.Y.Z`. El workflow aborta si el tag no
+  coincide con `version` del manifest, así que **sube la versión del manifest primero**.
+- Chrome no permite instalar `.zip`/`.crx` fuera de la Web Store: la distribución real es
+  descargar el zip de la release, descomprimir y "Cargar descomprimida".
 
 ## Créditos (mantener visibles)
 
