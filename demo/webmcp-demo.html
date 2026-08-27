@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demo WebMCP · lista de tareas</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    max-width: 640px;
+    margin: 40px auto;
+    padding: 0 20px;
+  }
+  h1 { font-size: 20px; }
+  code { font-family: ui-monospace, Consolas, monospace; background: rgba(127,127,127,.16); padding: 1px 5px; border-radius: 4px; }
+  ul { padding-left: 20px; }
+  li.done { text-decoration: line-through; opacity: .6; }
+  .card { border: 1px solid rgba(127,127,127,.35); border-radius: 10px; padding: 14px 18px; margin-top: 18px; }
+  .muted { color: #6b7280; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>Demo WebMCP · lista de tareas</h1>
+  <p class="muted">
+    Esta página registra cuatro herramientas en <code>navigator.modelContext</code>.
+    Abre el side panel de <strong>WebMCP Local Agent</strong> y pídele cosas como
+    «añade comprar pan», «marca la 2 como hecha» o «¿qué me queda pendiente?».
+  </p>
+
+  <div class="card">
+    <strong>Tareas</strong>
+    <ul id="list"></ul>
+    <p class="muted" id="counter"></p>
+  </div>
+
+  <div class="card">
+    <strong>Tema de la página</strong>
+    <p class="muted">El agente puede cambiarlo con la tool <code>set-theme</code>.</p>
+  </div>
+
+<script>
+// --- Estado de la página ---------------------------------------------------
+const todos = [
+  { id: 1, text: 'Probar WebMCP con Ollama', done: false },
+  { id: 2, text: 'Escribir el README', done: true },
+];
+let nextId = 3;
+
+function render() {
+  const list = document.getElementById('list');
+  list.textContent = '';
+  for (const todo of todos) {
+    const li = document.createElement('li');
+    li.textContent = '#' + todo.id + ' · ' + todo.text;
+    if (todo.done) li.className = 'done';
+    list.appendChild(li);
+  }
+  const pending = todos.filter((t) => !t.done).length;
+  document.getElementById('counter').textContent = pending + ' pendiente(s) de ' + todos.length;
+}
+render();
+
+// --- Polyfill mínimo de WebMCP para navegadores sin la API nativa ----------
+if (!('modelContext' in navigator)) {
+  const registered = [];
+  navigator.modelContext = {
+    get tools() { return registered.slice(); },
+    provideContext(config) {
+      registered.length = 0;
+      if (config && Array.isArray(config.tools)) registered.push(...config.tools);
+    },
+    registerTool(tool) { registered.push(tool); },
+    unregisterTool(name) {
+      const index = registered.findIndex((tool) => tool.name === name);
+      if (index >= 0) registered.splice(index, 1);
+    },
+    async callTool(name, args) {
+      const tool = registered.find((entry) => entry.name === name);
+      if (!tool) throw new Error('Tool desconocida: ' + name);
+      return tool.execute(args);
+    },
+  };
+}
+
+const text = (value) => ({ content: [{ type: 'text', text: value }] });
+
+// --- Herramientas ----------------------------------------------------------
+navigator.modelContext.provideContext({
+  tools: [
+    {
+      name: 'list-todos',
+      description: 'Devuelve todas las tareas de la lista con su id y su estado.',
+      inputSchema: { type: 'object', properties: {}, required: [] },
+      async execute() {
+        if (!todos.length) return text('La lista está vacía.');
+        return text(todos.map((t) => '#' + t.id + ' [' + (t.done ? 'hecha' : 'pendiente') + '] ' + t.text).join('\n'));
+      },
+    },
+    {
+      name: 'add-todo',
+      description: 'Añade una nueva tarea a la lista.',
+      inputSchema: {
+        type: 'object',
+        properties: { text: { type: 'string', description: 'Texto de la tarea' } },
+        required: ['text'],
+      },
+      async execute({ text: value }) {
+        if (!value) throw new Error('Falta el texto de la tarea.');
+        const todo = { id: nextId++, text: String(value), done: false };
+        todos.push(todo);
+        render();
+        return text('Tarea #' + todo.id + ' añadida: ' + todo.text);
+      },
+    },
+    {
+      name: 'complete-todo',
+      description: 'Marca una tarea como completada a partir de su id.',
+      inputSchema: {
+        type: 'object',
+        properties: { id: { type: 'number', description: 'Id de la tarea' } },
+        required: ['id'],
+      },
+      async execute({ id }) {
+        const todo = todos.find((entry) => entry.id === Number(id));
+        if (!todo) throw new Error('No existe la tarea #' + id);
+        todo.done = true;
+        render();
+        return text('Tarea #' + todo.id + ' marcada como hecha.');
+      },
+    },
+    {
+      name: 'set-theme',
+      description: 'Cambia el tema visual de la página entre claro y oscuro.',
+      inputSchema: {
+        type: 'object',
+        properties: { theme: { type: 'string', enum: ['light', 'dark'] } },
+        required: ['theme'],
+      },
+      async execute({ theme }) {
+        const dark = String(theme).toLowerCase() === 'dark';
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+        document.body.style.background = dark ? '#111318' : '#ffffff';
+        document.body.style.color = dark ? '#e7e9ee' : '#16181d';
+        return text('Tema cambiado a ' + (dark ? 'oscuro' : 'claro') + '.');
+      },
+    },
+  ],
+});
+</script>
+</body>
+</html>
