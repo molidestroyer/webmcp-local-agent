@@ -171,11 +171,41 @@ El *streaming* también muestra el bloque `thinking` de los modelos que razonan
 
 | Síntoma | Causa → Solución |
 | --- | --- |
+| **Los modelos cargan pero al enviar sale `403`** | El caso más frecuente. Ver abajo. |
 | «Ollama no detectado» | El servicio no está arrancado → `ollama serve`, luego 🔄. |
-| Falla el `fetch` con error de CORS | Ollama no acepta el origen de la extensión → arranca con `OLLAMA_ORIGINS=chrome-extension://*` (en Windows: `setx OLLAMA_ORIGINS "chrome-extension://*"` y reinicia Ollama). |
 | «0 Tools» en una página que sí las tiene | La pestaña se cargó antes de instalar la extensión → F5. |
 | «No se pudo conectar con la pestaña» | Páginas `chrome://`, `chrome-extension://` y la Chrome Web Store no admiten content scripts. |
 | El modelo ignora las herramientas | Ese modelo no tiene capacidad `tools` → elige uno marcado con `· tools`. |
+
+### El `403` de Ollama (léelo antes de abrir un issue)
+
+Ollama solo acepta peticiones desde los orígenes de `OLLAMA_ORIGINS`, y
+`chrome-extension://` **no está en la lista por defecto**. El síntoma despista porque
+falla a medias: Chrome no añade la cabecera `Origin` al `GET /api/tags` (no lleva
+cabeceras propias), así que **la lista de modelos carga bien**; pero el `POST /api/chat`
+sí manda `Content-Type: application/json`, Chrome añade `Origin` y Ollama devuelve `403`.
+
+Comprobado contra Ollama 0.32.15:
+
+| Petición | Código |
+| --- | --- |
+| `POST /api/chat` sin `Origin` | `200` |
+| `POST /api/chat` con `Origin: chrome-extension://…` | `403` |
+
+Solución, en Windows:
+
+```bash
+setx OLLAMA_ORIGINS "chrome-extension://*"
+```
+
+y **reinicia Ollama** desde el icono de la bandeja — `setx` solo afecta a procesos nuevos,
+no al que ya está corriendo. En Linux/macOS, `export OLLAMA_ORIGINS='chrome-extension://*'`
+antes de `ollama serve` (o `systemctl edit ollama` si va como servicio).
+
+> La extensión **no** intenta esquivar esto borrando la cabecera `Origin` con
+> `declarativeNetRequest`. Sería posible, pero esa regla se aplicaría también a las
+> peticiones de cualquier web que visites, y dejaría tu Ollama local accesible desde
+> cualquier página. Es preferible el cambio explícito de configuración.
 
 ---
 

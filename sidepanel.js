@@ -8,6 +8,19 @@
 
 const OLLAMA_HOSTS = ['http://127.0.0.1:11434', 'http://localhost:11434'];
 const MAX_TOOL_STEPS = 6;
+
+// Ollama rechaza con 403 cualquier origen que no este en OLLAMA_ORIGINS, y
+// chrome-extension:// no entra en la lista por defecto. Chrome no manda Origin
+// en el GET de /api/tags (sin cabeceras), pero si en el POST de /api/chat, asi
+// que el sintoma tipico es "los modelos cargan pero al enviar sale 403".
+const CORS_HINT = 'Ollama rechaza el origen de la extensión (403). Arráncalo permitiéndolo: '
+  + 'en Windows ejecuta  setx OLLAMA_ORIGINS "chrome-extension://*"  y reinicia Ollama '
+  + 'desde el icono de la bandeja (setx solo afecta a procesos nuevos).';
+
+function describeHttpError(status, detail) {
+  if (status === 403) return CORS_HINT;
+  return 'Ollama respondió ' + status + '. ' + String(detail || '').slice(0, 300);
+}
 const SYSTEM_PROMPT = [
   'Eres un agente que asiste al usuario sobre la pagina web que tiene abierta.',
   'La pagina puede exponer herramientas (WebMCP). Usalas cuando sirvan para',
@@ -273,6 +286,18 @@ async function fetchLocalModels() {
   for (const host of OLLAMA_HOSTS) {
     try {
       const response = await fetch(host + '/api/tags', { cache: 'no-store' });
+      if (response.status === 403) {
+        // Ollama esta vivo pero no acepta el origen: no seguir probando hosts,
+        // el mensaje de "no detectado" seria enganoso.
+        state.host = host;
+        state.ollamaOk = false;
+        state.models = [];
+        state.model = '';
+        renderModelOptions('Ollama rechaza la extensión');
+        showStatus(CORS_HINT);
+        updateSendState();
+        return;
+      }
       if (!response.ok) throw new Error('HTTP ' + response.status);
       const data = await response.json();
       const models = (data.models || [])
@@ -475,7 +500,9 @@ async function ollamaChat(messages, tools, onDelta) {
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new Error('Ollama respondió ' + response.status + '. ' + detail.slice(0, 300));
+    const error = new Error(describeHttpError(response.status, detail));
+    error.status = response.status;
+    throw error;
   }
 
   const reader = response.body.getReader();
@@ -580,7 +607,11 @@ async function runAgent() {
     try {
       reply = await ollamaChat(state.messages, tools, (kind, delta) => bubble.append(kind, delta));
     } catch (err) {
-      bubble.fail('Fallo al hablar con Ollama: ' + String((err && err.message) || err));
+      const message = String((err && err.message) || err);
+      // El 403 no se arregla reintentando: hay que reconfigurar Ollama, asi que
+      // ademas del mensaje en el chat lo dejamos fijo en la barra de estado.
+      if (err && err.status === 403) showStatus(CORS_HINT);
+      bubble.fail('Fallo al hablar con Ollama: ' + message);
       return;
     }
 

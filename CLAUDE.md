@@ -56,7 +56,14 @@ Todo es local: el único destino de red es Ollama.
 - Tras recargar la extensión hay que **F5 en las pestañas abiertas**; los content scripts
   no se reinyectan solos.
 - El SW se duerme: `content.js` reconecta el puerto en `onDisconnect` con 1 s de retardo.
-- Ollama necesita `OLLAMA_ORIGINS=chrome-extension://*` si rechaza el origen (CORS).
+- **`403` de Ollama**: `chrome-extension://` no está en `OLLAMA_ORIGINS` por defecto.
+  Despista porque falla a medias: Chrome no añade `Origin` al `GET /api/tags` (va sin
+  cabeceras) y los modelos cargan, pero el `POST /api/chat` lleva `Content-Type` → Chrome
+  añade `Origin` → 403. Verificado en Ollama 0.32.15: mismo POST sin `Origin` da 200.
+  Solución: `setx OLLAMA_ORIGINS "chrome-extension://*"` + reiniciar Ollama.
+  Decisión consciente: **no** se esquiva borrando `Origin` con `declarativeNetRequest`,
+  porque esa regla afectaría también a las peticiones de cualquier web y expondría el
+  Ollama local a cualquier página.
 - El streaming de `/api/chat` es NDJSON; `tool_calls` llega como objeto completo en un
   chunk, no como deltas → se acumula con `push(...)`.
 - Los modelos sin capacidad `tools` (ver `/api/tags` → `capabilities`) ignoran el array
