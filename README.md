@@ -49,7 +49,7 @@ desplegable pero ignorarán las herramientas. El selector marca con `· tools` l
 1. Clona el repo:
 
 ```bash
-git clone https://github.com/molidestroyer/WEBMCP_Ollama.git
+git clone https://github.com/molidestroyer/webmcp-local-agent.git
 ```
 
 2. Abre `chrome://extensions`, activa **Modo desarrollador**.
