@@ -70,11 +70,13 @@ Repo language is **English** — code, comments, UI strings, docs and commit mes
   chunk, not as deltas → accumulated with `push(...)`.
 - Models without the `tools` capability (see `/api/tags` → `capabilities`) ignore the tool
   array without raising an error.
-- **`.chat > * { flex: 0 0 auto; }` is load-bearing.** `.chat` is a flex column, so its
-  children default to `flex-shrink: 1` and get squeezed once the conversation overflows
-  instead of letting `.chat` scroll. Because `.toolcall` clips with `overflow: hidden`
-  (needed for the `border-radius`), squeezing collapsed it to a 2px yellow line — measured,
-  not guessed. Any new direct child of `.chat` needs the same treatment.
+- **`flex: 0 0 auto` on the children of `.chat` and `.tools-list` is load-bearing.** Both
+  are flex columns, so their children default to `flex-shrink: 1` and get squeezed once the
+  content overflows instead of letting the container scroll. `.toolcall` and `.tool-card`
+  both clip with `overflow: hidden` (needed for the `border-radius`), so squeezing does not
+  produce a scrollbar — it silently cuts them off. Measured, not guessed: a tool call card
+  collapsed to 2px, and tool cards lost their footer. **Any scrolling flex column added
+  here needs the same rule.**
 
 ## Running it
 

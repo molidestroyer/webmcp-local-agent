@@ -52,6 +52,8 @@ const state = {
   models: [],
   model: '',
   tools: [],
+  // Tool names whose card is expanded, so re-renders do not collapse them.
+  openTools: new Set(),
   messages: [{ role: 'system', content: SYSTEM_PROMPT }],
   tabId: null,
   busy: false,
@@ -425,6 +427,281 @@ function renderToolsBadge(text) {
   els.toolsBadge.classList.toggle('has-tools', count > 0);
 }
 
+// --- Tool inspector cards --------------------------------------------------
+
+const TOOL_ICONS = [
+  [/(book|reserve|schedul|appointment|slot|calendar|date)/, '📅'],
+  [/(cart|buy|order|checkout|purchas|pay)/, '🛒'],
+  [/(search|find|query|lookup)/, '🔍'],
+  [/(add|create|new|insert|append)/, '➕'],
+  [/(delete|remove|clear|cancel)/, '🗑'],
+  [/(list|todos|items|all|get|read|fetch|info)/, '📋'],
+  [/(update|edit|set|change|toggle)/, '✏️'],
+  [/(theme|color|style|dark|light)/, '🎨'],
+  [/(send|mail|message|notify|email)/, '✉️'],
+  [/(user|account|profile|login|auth)/, '👤'],
+  [/(nav|open|go|route|scroll|click)/, '🧭'],
+];
+
+function iconForTool(tool) {
+  const haystack = (tool.name + ' ' + (tool.description || '')).toLowerCase();
+  for (const [pattern, icon] of TOOL_ICONS) {
+    if (pattern.test(haystack)) return icon;
+  }
+  return '⚡';
+}
+
+/** `checkInDate` / `check_in_date` / `check-in-date` -> `Check In Date`. */
+function humanizeParam(key) {
+  return String(key)
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function schemaOf(tool) {
+  const schema = tool.inputSchema || tool.parameters;
+  return schema && typeof schema === 'object' && !Array.isArray(schema) ? schema : {};
+}
+
+function propertyNames(schema) {
+  const props = schema.properties;
+  return props && typeof props === 'object' ? Object.keys(props) : [];
+}
+
+function requiredNames(schema) {
+  return Array.isArray(schema.required) ? schema.required : [];
+}
+
+/** Plain-language summary of what the tool asks for. */
+function describeNeeds(props, required) {
+  if (!props.length) return 'No input needed.';
+  const primary = (required.length ? required : props).map(humanizeParam);
+  if (props.length === 1) return 'Needs: ' + primary[0] + '.';
+  // "and more" tracks the total, not just the sample: a tool with 2 required and
+  // 2 optional params still asks for 4 things.
+  const shown = primary.slice(0, 2);
+  const more = props.length > shown.length;
+  const sample = more ? shown.join(', ') + ' and more' : shown.join(' and ');
+  return 'Needs ' + props.length + ' details (like ' + sample + ').';
+}
+
+function makeSection(labelText) {
+  const section = document.createElement('div');
+  section.className = 'tool-card__section';
+  const label = document.createElement('div');
+  label.className = 'tool-card__label';
+  label.textContent = labelText;
+  section.appendChild(label);
+  return section;
+}
+
+/** Small form so a tool can be tried by hand, typed from its JSON Schema. */
+function buildToolForm(schema, props) {
+  const form = document.createElement('div');
+  form.className = 'tool-form';
+  const required = requiredNames(schema);
+  const readers = [];
+
+  for (const key of props) {
+    const def = (schema.properties && schema.properties[key]) || {};
+    const field = document.createElement('div');
+    field.className = 'tool-form__field';
+
+    const label = document.createElement('label');
+    label.textContent = key + (required.includes(key) ? ' *' : '');
+    field.appendChild(label);
+
+    let input;
+    if (Array.isArray(def.enum) && def.enum.length) {
+      input = document.createElement('select');
+      if (!required.includes(key)) input.appendChild(new Option('', ''));
+      for (const value of def.enum) input.appendChild(new Option(String(value), String(value)));
+    } else if (def.type === 'boolean') {
+      input = document.createElement('input');
+      input.type = 'checkbox';
+    } else if (def.type === 'number' || def.type === 'integer') {
+      input = document.createElement('input');
+      input.type = 'number';
+      if (def.type === 'integer') input.step = '1';
+    } else {
+      input = document.createElement('input');
+      input.type = 'text';
+    }
+    if (def.description) {
+      input.title = def.description;
+      if (input.type === 'text' || input.type === 'number') input.placeholder = def.description;
+    }
+
+    field.appendChild(input);
+    form.appendChild(field);
+
+    readers.push(() => {
+      if (def.type === 'boolean') return [key, input.checked];
+      const raw = input.value;
+      if (raw === '' && !required.includes(key)) return null;
+      if (def.type === 'number' || def.type === 'integer') {
+        const num = Number(raw);
+        return [key, Number.isNaN(num) ? raw : num];
+      }
+      if (def.type === 'array' || def.type === 'object') {
+        try {
+          return [key, JSON.parse(raw)];
+        } catch (_) {
+          return [key, raw];
+        }
+      }
+      return [key, raw];
+    });
+  }
+
+  return {
+    element: form,
+    read() {
+      const args = {};
+      for (const reader of readers) {
+        const entry = reader();
+        if (entry) args[entry[0]] = entry[1];
+      }
+      return args;
+    },
+  };
+}
+
+function createToolListItem(tool) {
+  const schema = schemaOf(tool);
+  const props = propertyNames(schema);
+  const required = requiredNames(schema);
+
+  const card = document.createElement('div');
+  card.className = 'tool-card';
+  if (state.openTools.has(tool.name)) card.classList.add('is-open');
+
+  // --- Header (always visible)
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'tool-card__head';
+  head.setAttribute('aria-expanded', String(card.classList.contains('is-open')));
+
+  const icon = document.createElement('span');
+  icon.className = 'tool-card__icon';
+  icon.textContent = iconForTool(tool);
+
+  const titles = document.createElement('div');
+  titles.className = 'tool-card__titles';
+  const title = document.createElement('div');
+  title.className = 'tool-card__name';
+  title.textContent = humanizeParam(tool.name);
+  const id = document.createElement('div');
+  id.className = 'tool-card__id';
+  id.textContent = tool.name;
+  const teaser = document.createElement('div');
+  teaser.className = 'tool-card__teaser';
+  teaser.textContent = tool.description || 'No description provided.';
+  titles.append(title, id, teaser);
+
+  const chevron = document.createElement('span');
+  chevron.className = 'tool-card__chevron';
+  chevron.textContent = '▼';
+
+  head.append(icon, titles, chevron);
+
+  // --- Expandable body
+  const details = document.createElement('div');
+  details.className = 'tool-card__details';
+  const inner = document.createElement('div');
+  details.appendChild(inner);
+
+  const does = makeSection('What it does');
+  const doesText = document.createElement('div');
+  doesText.className = 'tool-card__text';
+  doesText.textContent = tool.description || 'The page did not provide a description.';
+  does.appendChild(doesText);
+
+  const needs = makeSection('What it needs');
+  const needsText = document.createElement('div');
+  needsText.className = 'tool-card__text';
+  needsText.textContent = describeNeeds(props, required);
+  needs.appendChild(needsText);
+
+  inner.append(does, needs);
+
+  if (props.length) {
+    const params = makeSection('Parameters');
+    const pills = document.createElement('div');
+    pills.className = 'pills';
+    for (const key of props) {
+      const pill = document.createElement('span');
+      pill.className = 'pill' + (required.includes(key) ? ' pill--required' : '');
+      const def = (schema.properties && schema.properties[key]) || {};
+      pill.textContent = key + (def.type ? ':' + def.type : '');
+      if (def.description) pill.title = def.description;
+      pills.appendChild(pill);
+    }
+    params.appendChild(pills);
+    inner.appendChild(params);
+  }
+
+  // --- Manual run
+  const runSection = makeSection('Try it');
+  const form = buildToolForm(schema, props);
+  if (props.length) runSection.appendChild(form.element);
+  const output = document.createElement('div');
+  output.className = 'tool-out';
+  output.hidden = true;
+  runSection.appendChild(output);
+  inner.appendChild(runSection);
+
+  // --- Footer
+  const foot = document.createElement('div');
+  foot.className = 'tool-card__foot';
+  const via = document.createElement('span');
+  via.textContent = 'Registered via';
+  const source = document.createElement('span');
+  source.className = 'pill tool-card__source';
+  source.textContent = '⚙️ JavaScript API';
+  // The raw object the tool came from is more precise than the friendly label.
+  if (tool.source) source.title = tool.source;
+  const run = document.createElement('button');
+  run.type = 'button';
+  run.className = 'tool-card__run';
+  run.textContent = 'Run ▶';
+  foot.append(via, source, run);
+
+  card.append(head, details, foot);
+
+  // --- Behaviour
+  head.addEventListener('click', () => {
+    const open = card.classList.toggle('is-open');
+    head.setAttribute('aria-expanded', String(open));
+    if (open) state.openTools.add(tool.name);
+    else state.openTools.delete(tool.name);
+  });
+
+  run.addEventListener('click', async () => {
+    if (!card.classList.contains('is-open')) head.click();
+    run.disabled = true;
+    run.textContent = 'Running…';
+    output.hidden = false;
+    output.className = 'tool-out';
+    output.textContent = 'Running…';
+
+    const answer = await bridge('execute', { name: tool.name, args: form.read() });
+    if (!answer || answer.error) {
+      output.className = 'tool-out tool-out--err';
+      output.textContent = (answer && answer.error) || 'Unknown error.';
+    } else {
+      output.textContent = resultToText(answer.result);
+    }
+    run.disabled = false;
+    run.textContent = 'Run ▶';
+  });
+
+  return card;
+}
+
 function renderToolsList() {
   els.toolsList.textContent = '';
   if (!state.tools.length) {
@@ -432,16 +709,7 @@ function renderToolsList() {
     return;
   }
   for (const tool of state.tools) {
-    const item = document.createElement('div');
-    item.className = 'tools-list__item';
-    const name = document.createElement('div');
-    name.className = 'tools-list__name';
-    name.textContent = tool.name;
-    const desc = document.createElement('div');
-    desc.className = 'tools-list__desc';
-    desc.textContent = tool.description || 'No description.';
-    item.append(name, desc);
-    els.toolsList.appendChild(item);
+    els.toolsList.appendChild(createToolListItem(tool));
   }
 }
 
