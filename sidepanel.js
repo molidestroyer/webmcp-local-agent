@@ -1,34 +1,36 @@
 /**
  * WebMCP Local Agent - sidepanel.js
  *
- * Logica del agente: descubre modelos de Ollama, descubre las tools WebMCP de
- * la pestana activa y ejecuta el ciclo de tool calling contra /api/chat.
+ * Agent logic: discovers Ollama models, discovers the WebMCP tools exposed by
+ * the active tab and runs the tool-calling loop against /api/chat.
  */
 'use strict';
 
 const OLLAMA_HOSTS = ['http://127.0.0.1:11434', 'http://localhost:11434'];
 const MAX_TOOL_STEPS = 6;
 
-// Ollama rechaza con 403 cualquier origen que no este en OLLAMA_ORIGINS, y
-// chrome-extension:// no entra en la lista por defecto. Chrome no manda Origin
-// en el GET de /api/tags (sin cabeceras), pero si en el POST de /api/chat, asi
-// que el sintoma tipico es "los modelos cargan pero al enviar sale 403".
-const CORS_HINT = 'Ollama rechaza el origen de la extensión (403). Arráncalo permitiéndolo: '
-  + 'en Windows ejecuta  setx OLLAMA_ORIGINS "chrome-extension://*"  y reinicia Ollama '
-  + 'desde el icono de la bandeja (setx solo afecta a procesos nuevos).';
+// Ollama answers 403 to any origin missing from OLLAMA_ORIGINS, and
+// chrome-extension:// is not allowed by default. Chrome does not attach an
+// Origin header to the GET on /api/tags (it carries no headers of its own) but
+// it does to the POST on /api/chat, hence the confusing symptom: "the models
+// load fine but sending a message returns 403".
+const CORS_HINT = 'Ollama is rejecting the extension origin (403). Allow it: on Windows run '
+  + '  setx OLLAMA_ORIGINS "chrome-extension://*"  and restart Ollama from the tray icon '
+  + '(setx only affects newly started processes).';
+
+const SYSTEM_PROMPT = [
+  'You are an agent helping the user with the web page they currently have open.',
+  'The page may expose tools (WebMCP). Use them whenever they help you answer or',
+  'act on the page, passing exactly the arguments their schema requires.',
+  'If no tool is useful, just answer directly.',
+  'Never invent tools or results: if a call fails, say so.',
+  'Reply in the language the user writes in, and be concise.',
+].join(' ');
 
 function describeHttpError(status, detail) {
   if (status === 403) return CORS_HINT;
-  return 'Ollama respondió ' + status + '. ' + String(detail || '').slice(0, 300);
+  return 'Ollama responded ' + status + '. ' + String(detail || '').slice(0, 300);
 }
-const SYSTEM_PROMPT = [
-  'Eres un agente que asiste al usuario sobre la pagina web que tiene abierta.',
-  'La pagina puede exponer herramientas (WebMCP). Usalas cuando sirvan para',
-  'responder o para actuar sobre la pagina, con los argumentos exactos que pide',
-  'su esquema. Si no hay ninguna herramienta util, responde directamente.',
-  'No inventes herramientas ni resultados: si una llamada falla, dilo.',
-  'Responde en el idioma del usuario y se breve.',
-].join(' ');
 
 const els = {
   modelSelect: document.getElementById('model-select'),
@@ -56,7 +58,7 @@ const state = {
   ollamaOk: false,
 };
 
-// --- Utilidades ------------------------------------------------------------
+// --- Helpers ---------------------------------------------------------------
 
 function scrollToBottom() {
   els.chat.scrollTop = els.chat.scrollHeight;
@@ -81,7 +83,7 @@ function updateSendState() {
   els.send.disabled = state.busy || !state.ollamaOk || !state.model || !els.input.value.trim();
 }
 
-/** Markdown minimo y seguro (sin innerHTML de contenido del modelo). */
+/** Minimal, safe markdown (never innerHTML for model output). */
 function renderMarkdown(container, text) {
   container.textContent = '';
   const parts = String(text).split(/```/);
@@ -117,7 +119,7 @@ function pretty(value) {
   }
 }
 
-// --- Render de mensajes ----------------------------------------------------
+// --- Message rendering -----------------------------------------------------
 
 function addMessage(role, text) {
   clearEmptyState();
@@ -130,7 +132,7 @@ function addMessage(role, text) {
   return div;
 }
 
-/** Burbuja de asistente que se va rellenando en streaming. */
+/** Assistant bubble that fills in as the response streams. */
 function createAssistantBubble() {
   clearEmptyState();
   const wrapper = document.createElement('div');
@@ -155,7 +157,7 @@ function createAssistantBubble() {
           thinkingBox = document.createElement('details');
           thinkingBox.className = 'thinking';
           const summary = document.createElement('summary');
-          summary.textContent = 'Razonamiento del modelo';
+          summary.textContent = 'Model reasoning';
           thinkingPre = document.createElement('pre');
           thinkingBox.append(summary, thinkingPre);
           wrapper.insertBefore(thinkingBox, body);
@@ -189,7 +191,7 @@ function createAssistantBubble() {
   };
 }
 
-/** Bloque visual de una llamada a herramienta. */
+/** Visual block for a single tool call. */
 function createToolCard(name, args) {
   clearEmptyState();
   const card = document.createElement('div');
@@ -204,14 +206,14 @@ function createToolCard(name, args) {
   label.textContent = name;
   const stateEl = document.createElement('span');
   stateEl.className = 'toolcall__state';
-  stateEl.textContent = 'ejecutando…';
+  stateEl.textContent = 'running…';
   head.append(icon, label, stateEl);
 
   const body = document.createElement('div');
   body.className = 'toolcall__body';
   const argsLabel = document.createElement('div');
   argsLabel.className = 'toolcall__label';
-  argsLabel.textContent = 'Argumentos';
+  argsLabel.textContent = 'Arguments';
   const argsPre = document.createElement('pre');
   argsPre.textContent = pretty(args);
   body.append(argsLabel, argsPre);
@@ -235,7 +237,7 @@ function createToolCard(name, args) {
     done(text) {
       card.classList.add('toolcall--ok');
       stateEl.textContent = 'ok';
-      addResult('Resultado', text);
+      addResult('Result', text);
     },
     fail(text) {
       card.classList.add('toolcall--err');
@@ -244,29 +246,29 @@ function createToolCard(name, args) {
     },
     cancelled(text) {
       card.classList.add('toolcall--err');
-      stateEl.textContent = 'cancelada';
-      addResult('Estado', text);
+      stateEl.textContent = 'cancelled';
+      addResult('Status', text);
     },
-    /** Muestra los botones de confirmacion y espera la decision. */
+    /** Shows the confirmation buttons and waits for the decision. */
     confirm() {
-      stateEl.textContent = 'esperando confirmación';
+      stateEl.textContent = 'awaiting confirmation';
       return new Promise((resolve) => {
         const row = document.createElement('div');
         row.className = 'toolcall__confirm';
         const yes = document.createElement('button');
         yes.type = 'button';
         yes.className = 'primary';
-        yes.textContent = 'Ejecutar';
+        yes.textContent = 'Run';
         const no = document.createElement('button');
         no.type = 'button';
-        no.textContent = 'Cancelar';
+        no.textContent = 'Cancel';
         row.append(yes, no);
         card.appendChild(row);
         scrollToBottom();
 
         const finish = (value) => {
           row.remove();
-          stateEl.textContent = value ? 'ejecutando…' : 'cancelada';
+          stateEl.textContent = value ? 'running…' : 'cancelled';
           resolve(value);
         };
         yes.addEventListener('click', () => finish(true));
@@ -276,7 +278,7 @@ function createToolCard(name, args) {
   };
 }
 
-// --- Modelos de Ollama -----------------------------------------------------
+// --- Ollama models ---------------------------------------------------------
 
 async function fetchLocalModels() {
   els.refreshModels.classList.add('is-spinning');
@@ -287,13 +289,13 @@ async function fetchLocalModels() {
     try {
       const response = await fetch(host + '/api/tags', { cache: 'no-store' });
       if (response.status === 403) {
-        // Ollama esta vivo pero no acepta el origen: no seguir probando hosts,
-        // el mensaje de "no detectado" seria enganoso.
+        // Ollama is alive but rejects our origin: stop trying other hosts, a
+        // "not detected" message would be misleading.
         state.host = host;
         state.ollamaOk = false;
         state.models = [];
         state.model = '';
-        renderModelOptions('Ollama rechaza la extensión');
+        renderModelOptions('Ollama rejects the extension');
         showStatus(CORS_HINT);
         updateSendState();
         return;
@@ -314,8 +316,8 @@ async function fetchLocalModels() {
       state.ollamaOk = models.length > 0;
 
       if (!models.length) {
-        renderModelOptions('Ollama sin modelos descargados');
-        showStatus('Ollama responde pero no hay modelos. Descarga uno con: ollama pull qwen3:8b');
+        renderModelOptions('No models pulled');
+        showStatus('Ollama is running but has no models. Pull one with: ollama pull qwen3:8b');
         updateSendState();
         return;
       }
@@ -339,9 +341,9 @@ async function fetchLocalModels() {
   state.ollamaOk = false;
   state.models = [];
   state.model = '';
-  renderModelOptions('Ollama no detectado');
+  renderModelOptions('Ollama not detected');
   showStatus(
-    'Ollama no detectado en 127.0.0.1:11434. Arráncalo con "ollama serve" y pulsa 🔄. '
+    'Ollama not detected on 127.0.0.1:11434. Start it with "ollama serve" and hit 🔄. '
     + (lastError ? '(' + lastError.message + ')' : '')
   );
   updateSendState();
@@ -368,7 +370,7 @@ function renderModelOptions(placeholder) {
   }
 }
 
-// --- Tools de la pagina ----------------------------------------------------
+// --- Page tools ------------------------------------------------------------
 
 async function currentTabId() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -384,7 +386,7 @@ async function bridge(action, payload) {
       action,
       payload,
     });
-    return answer || { result: null, error: 'El service worker no respondió.' };
+    return answer || { result: null, error: 'The service worker did not respond.' };
   } catch (err) {
     return { result: null, error: String((err && err.message) || err) };
   }
@@ -396,14 +398,14 @@ async function detectPageTools() {
     await currentTabId();
     if (state.tabId == null) {
       state.tools = [];
-      renderToolsBadge('Sin pestaña activa');
+      renderToolsBadge('No active tab');
       return;
     }
 
     const answer = await bridge('list', null);
     if (!answer || answer.error) {
       state.tools = [];
-      renderToolsBadge('0 Tools');
+      renderToolsBadge('0 tools');
       els.toolsList.textContent = '';
       els.toolsList.hidden = true;
       return;
@@ -419,7 +421,7 @@ async function detectPageTools() {
 
 function renderToolsBadge(text) {
   const count = state.tools.length;
-  els.toolsBadgeText.textContent = text || (count === 1 ? '1 Tool detectada' : count + ' Tools detectadas');
+  els.toolsBadgeText.textContent = text || (count === 1 ? '1 tool detected' : count + ' tools detected');
   els.toolsBadge.classList.toggle('has-tools', count > 0);
 }
 
@@ -437,7 +439,7 @@ function renderToolsList() {
     name.textContent = tool.name;
     const desc = document.createElement('div');
     desc.className = 'tools-list__desc';
-    desc.textContent = tool.description || 'Sin descripción.';
+    desc.textContent = tool.description || 'No description.';
     item.append(name, desc);
     els.toolsList.appendChild(item);
   }
@@ -464,9 +466,9 @@ function toOllamaTool(tool) {
   };
 }
 
-/** Convierte el resultado de una tool (formato MCP o libre) en texto. */
+/** Turns a tool result (MCP shape or anything else) into text. */
 function resultToText(result) {
-  if (result === null || result === undefined) return 'La herramienta no devolvió ningún valor.';
+  if (result === null || result === undefined) return 'The tool returned no value.';
   if (typeof result === 'string') return result;
 
   if (Array.isArray(result.content)) {
@@ -482,7 +484,7 @@ function resultToText(result) {
   return pretty(result);
 }
 
-// --- Ciclo de chat ---------------------------------------------------------
+// --- Chat loop -------------------------------------------------------------
 
 async function ollamaChat(messages, tools, onDelta) {
   const body = {
@@ -569,10 +571,10 @@ async function runToolCall(call) {
   const fn = call.function || {};
   const name = fn.name;
   const args = parseArguments(fn.arguments);
-  const card = createToolCard(name || '(sin nombre)', args);
+  const card = createToolCard(name || '(unnamed)', args);
 
   if (!name || !state.tools.some((tool) => tool.name === name)) {
-    const text = 'La página no expone ninguna herramienta llamada "' + String(name) + '".';
+    const text = 'The page exposes no tool named "' + String(name) + '".';
     card.fail(text);
     return { role: 'tool', tool_name: String(name || 'unknown'), content: 'Error: ' + text };
   }
@@ -580,7 +582,7 @@ async function runToolCall(call) {
   if (els.confirmTools.checked) {
     const approved = await card.confirm();
     if (!approved) {
-      const text = 'El usuario canceló la ejecución de esta herramienta.';
+      const text = 'The user cancelled this tool call.';
       card.cancelled(text);
       return { role: 'tool', tool_name: name, content: text };
     }
@@ -588,7 +590,7 @@ async function runToolCall(call) {
 
   const answer = await bridge('execute', { name, args });
   if (!answer || answer.error) {
-    const text = (answer && answer.error) || 'Error desconocido al ejecutar la herramienta.';
+    const text = (answer && answer.error) || 'Unknown error while running the tool.';
     card.fail(text);
     return { role: 'tool', tool_name: name, content: 'Error: ' + text };
   }
@@ -608,10 +610,10 @@ async function runAgent() {
       reply = await ollamaChat(state.messages, tools, (kind, delta) => bubble.append(kind, delta));
     } catch (err) {
       const message = String((err && err.message) || err);
-      // El 403 no se arregla reintentando: hay que reconfigurar Ollama, asi que
-      // ademas del mensaje en el chat lo dejamos fijo en la barra de estado.
+      // A 403 will not fix itself on retry: Ollama has to be reconfigured, so
+      // keep the hint pinned in the status bar as well as in the chat.
       if (err && err.status === 403) showStatus(CORS_HINT);
-      bubble.fail('Fallo al hablar con Ollama: ' + message);
+      bubble.fail('Failed to reach Ollama: ' + message);
       return;
     }
 
@@ -625,7 +627,7 @@ async function runAgent() {
     }
   }
 
-  addMessage('note', 'Se alcanzó el límite de ' + MAX_TOOL_STEPS + ' rondas de herramientas.');
+  addMessage('note', 'Reached the limit of ' + MAX_TOOL_STEPS + ' tool rounds.');
 }
 
 async function sendMessage() {
@@ -650,7 +652,7 @@ async function sendMessage() {
   }
 }
 
-// --- Eventos ---------------------------------------------------------------
+// --- Events ----------------------------------------------------------------
 
 function autoGrow() {
   els.input.style.height = 'auto';
@@ -696,9 +698,9 @@ els.clearChat.addEventListener('click', () => {
   const empty = document.createElement('div');
   empty.className = 'empty';
   const title = document.createElement('h1');
-  title.textContent = 'Conversación vaciada';
+  title.textContent = 'Conversation cleared';
   const hint = document.createElement('p');
-  hint.textContent = 'Escribe un mensaje para empezar de nuevo.';
+  hint.textContent = 'Type a message to start over.';
   empty.append(title, hint);
   els.chat.appendChild(empty);
 });
@@ -717,7 +719,7 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
-// --- Arranque --------------------------------------------------------------
+// --- Bootstrap -------------------------------------------------------------
 
 (async function init() {
   const stored = await chrome.storage.local.get('confirmTools');

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,28 +9,28 @@
 <body>
   <header class="topbar">
     <div class="topbar__row">
-      <label class="sr-only" for="model-select">Modelo de Ollama</label>
-      <select id="model-select" aria-label="Modelo de Ollama">
-        <option value="">Cargando modelos…</option>
+      <label class="sr-only" for="model-select">Ollama model</label>
+      <select id="model-select" aria-label="Ollama model">
+        <option value="">Loading models…</option>
       </select>
-      <button id="refresh-models" class="icon-btn" type="button" title="Recargar modelos de Ollama">
+      <button id="refresh-models" class="icon-btn" type="button" title="Reload the list of Ollama models">
         <span aria-hidden="true">🔄</span>
-        <span class="sr-only">Recargar modelos</span>
+        <span class="sr-only">Reload models</span>
       </button>
     </div>
 
     <div class="topbar__row topbar__row--meta">
-      <button id="tools-badge" class="badge" type="button" title="Ver herramientas detectadas en la pestaña activa">
+      <button id="tools-badge" class="badge" type="button" title="Show the tools detected on the active tab">
         <span class="badge__dot" aria-hidden="true"></span>
-        <span id="tools-badge-text">Detectando tools…</span>
+        <span id="tools-badge-text">Detecting tools…</span>
       </button>
-      <button id="refresh-tools" class="icon-btn icon-btn--sm" type="button" title="Volver a inspeccionar la pestaña activa">
+      <button id="refresh-tools" class="icon-btn icon-btn--sm" type="button" title="Re-inspect the active tab">
         <span aria-hidden="true">⟳</span>
-        <span class="sr-only">Reinspeccionar la página</span>
+        <span class="sr-only">Re-inspect the page</span>
       </button>
-      <button id="clear-chat" class="icon-btn icon-btn--sm" type="button" title="Vaciar la conversación">
+      <button id="clear-chat" class="icon-btn icon-btn--sm" type="button" title="Clear the conversation">
         <span aria-hidden="true">🗑</span>
-        <span class="sr-only">Vaciar conversación</span>
+        <span class="sr-only">Clear conversation</span>
       </button>
     </div>
 
@@ -42,29 +42,29 @@
     <div class="empty">
       <h1>WebMCP Local Agent</h1>
       <p>
-        Chat con <strong>Ollama</strong> en local que puede llamar a las herramientas
-        <strong>WebMCP</strong> que expone la pestaña activa.
+        Chat with <strong>Ollama</strong> running locally, and let it call the
+        <strong>WebMCP</strong> tools exposed by the active tab.
       </p>
       <p class="empty__credits">
-        Inspirado en
+        Inspired by
         <a href="https://github.com/beaufortfrancois/model-context-tool-inspector" target="_blank" rel="noreferrer noopener">Model Context Tool Inspector</a>
-        de François Beaufort y en
+        by François Beaufort and
         <a href="https://github.com/n4ze3m/page-assist" target="_blank" rel="noreferrer noopener">Page Assist</a>
-        de n4ze3m.
+        by n4ze3m.
       </p>
     </div>
   </main>
 
   <footer class="composer">
-    <label class="toggle" title="Pedir confirmación antes de ejecutar cada herramienta de la página">
+    <label class="toggle" title="Ask for confirmation before running each page tool">
       <input type="checkbox" id="confirm-tools">
-      <span>Confirmar cada tool</span>
+      <span>Confirm every tool</span>
     </label>
     <div class="composer__row">
-      <textarea id="input" rows="1" placeholder="Escribe un mensaje… (Enter envía, Shift+Enter salta línea)"></textarea>
+      <textarea id="input" rows="1" placeholder="Type a message… (Enter sends, Shift+Enter for a new line)"></textarea>
       <button id="send" class="send-btn" type="button" disabled>
         <span aria-hidden="true">➤</span>
-        <span class="sr-only">Enviar</span>
+        <span class="sr-only">Send</span>
       </button>
     </div>
   </footer>

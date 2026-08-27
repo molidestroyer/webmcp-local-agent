@@ -1,15 +1,15 @@
 /**
  * WebMCP Local Agent - page-hook.js
  *
- * Se ejecuta en el MAIN world de la pagina (document_start) para poder ver el
- * objeto real `navigator.modelContext` / `window.modelContext`, que es invisible
- * desde el mundo aislado de un content script.
+ * Runs in the page's MAIN world (document_start) so it can see the real
+ * `navigator.modelContext` / `window.modelContext` object, which is invisible
+ * from a content script's isolated world.
  *
- * La tecnica de interceptar `provideContext()` / `registerTool()` para descubrir
- * las tools declaradas por la pagina esta tomada del enfoque de
- * "Model Context Tool Inspector" de Francois Beaufort:
+ * The technique of wrapping `provideContext()` / `registerTool()` to discover
+ * the tools a page declares follows the approach of François Beaufort's
+ * "Model Context Tool Inspector":
  *   https://github.com/beaufortfrancois/model-context-tool-inspector
- * Ver los creditos completos en el README.
+ * See the README for full credits.
  */
 (() => {
   'use strict';
@@ -69,7 +69,7 @@
     }, 120);
   }
 
-  // --- Interceptacion de la API de la pagina -------------------------------
+  // --- Wrapping the page API ----------------------------------------------
 
   function patch(target, label) {
     if (!target || typeof target !== 'object' || patchedObjects.has(target)) return;
@@ -80,15 +80,15 @@
       try {
         target.provideContext = function (config, ...rest) {
           try {
-            // provideContext() reemplaza el conjunto completo de tools.
+            // provideContext() replaces the whole tool set.
             registry.clear();
             const tools = config && config.tools;
             if (Array.isArray(tools)) tools.forEach((tool) => remember(tool, label));
             notifyToolsChanged();
-          } catch (_) { /* nunca romper la pagina */ }
+          } catch (_) { /* never break the page */ }
           return original(config, ...rest);
         };
-      } catch (_) { /* propiedad no escribible */ }
+      } catch (_) { /* non-writable property */ }
     }
 
     if (isFn(target.registerTool)) {
@@ -96,8 +96,8 @@
       try {
         target.registerTool = function (...args) {
           try {
-            // Forma A: registerTool({ name, description, inputSchema, execute })
-            // Forma B: registerTool(name, config, handler)  (estilo SDK de MCP)
+            // Shape A: registerTool({ name, description, inputSchema, execute })
+            // Shape B: registerTool(name, config, handler)  (MCP SDK style)
             if (typeof args[0] === 'string') {
               const name = args[0];
               const config = args[1] || {};
@@ -145,7 +145,7 @@
     for (const entry of contextObjects()) patch(entry.obj, entry.label);
   }
 
-  // La API puede aparecer despues (polyfills, bundles diferidos): reintentamos.
+  // The API may show up later (polyfills, deferred bundles), so keep retrying.
   patchAll();
   document.addEventListener('DOMContentLoaded', patchAll, { once: true });
   window.addEventListener('load', patchAll, { once: true });
@@ -155,13 +155,13 @@
     if (++retries > 30) clearInterval(retryTimer); // ~15 s
   }, 500);
 
-  // --- Descubrimiento y ejecucion -----------------------------------------
+  // --- Discovery and execution --------------------------------------------
 
   async function snapshot() {
     patchAll();
     for (const entry of contextObjects()) {
-      // Si la pagina registro tools antes de que pudieramos interceptar, aun
-      // podemos leerlas si la implementacion las expone.
+      // If the page registered its tools before we could wrap the API, we can
+      // still read them when the implementation exposes them.
       for (const key of ['tools', 'getTools', 'listTools']) {
         try {
           let value = entry.obj[key];
@@ -182,8 +182,8 @@
     const entry = registry.get(name);
 
     if (entry && entry.execute) {
-      // Distintas implementaciones esperan `execute(args)` o
-      // `execute({ name, arguments })`. Pasamos ambas formas a la vez.
+      // Implementations differ: some expect `execute(args)`, others
+      // `execute({ name, arguments })`. Pass both shapes at once.
       const payload = Object.assign({}, params);
       if (!('arguments' in payload)) payload.arguments = params;
       if (!('name' in payload)) payload.name = name;
@@ -195,10 +195,10 @@
       if (isFn(candidate.obj.executeTool)) return candidate.obj.executeTool(name, params);
     }
 
-    throw new Error('La pagina no expone ninguna herramienta llamada "' + name + '".');
+    throw new Error('The page exposes no tool named "' + name + '".');
   }
 
-  /** Deja el valor listo para structuredClone (postMessage). */
+  /** Makes the value safe for structuredClone (postMessage). */
   function serializable(value) {
     if (value === undefined || value === null) return null;
     const type = typeof value;
@@ -226,7 +226,7 @@
         const payload = data.payload || {};
         reply(serializable(await executeTool(payload.name, payload.args)));
       } else {
-        reply(null, 'Accion desconocida: ' + String(data.action));
+        reply(null, 'Unknown action: ' + String(data.action));
       }
     } catch (err) {
       reply(null, String((err && err.message) || err));

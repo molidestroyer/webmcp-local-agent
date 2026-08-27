@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "WebMCP Local Agent",
-  "version": "0.1.0",
-  "description": "Chatea con Ollama en local y deja que use las herramientas WebMCP que expone la pagina activa.",
+  "version": "0.2.0",
+  "description": "Chat with local Ollama and let it call the WebMCP tools exposed by the active page.",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "activeTab", "scripting", "storage", "tabs"],
   "host_permissions": [
@@ -14,7 +14,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Abrir WebMCP Local Agent",
+    "default_title": "Open WebMCP Local Agent",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

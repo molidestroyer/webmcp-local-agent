@@ -1,130 +1,135 @@
 # WebMCP Local Agent
 
-Extensión de Chrome (Manifest V3) que junta dos cosas en un side panel:
+A Chrome extension (Manifest V3) that combines two things in one side panel:
 
-1. **Inspección WebMCP** — detecta las herramientas que la página activa registra en
-   `navigator.modelContext` / `window.modelContext` y permite ejecutarlas.
-2. **Cliente local de Ollama** — chat contra `http://127.0.0.1:11434` con selector
-   dinámico de los modelos que tengas descargados y **tool calling** completo:
-   el modelo llama a las tools de la web y tú ves cada llamada, sus argumentos y su resultado.
+1. **WebMCP inspection** — detects the tools the active page registers on
+   `navigator.modelContext` / `window.modelContext` and can execute them.
+2. **Local Ollama client** — chat against `http://127.0.0.1:11434` with a dynamic
+   picker for the models you have pulled, and full **tool calling**: the model calls the
+   page's tools and you see every call, its arguments and its result.
 
-Todo ocurre en local. La extensión no habla con ningún servicio externo.
+Everything runs locally. The extension talks to no external service.
 
 ---
 
-## Créditos
+## Credits
 
-Este proyecto **no existiría sin el trabajo previo de estos autores**, y no es más que una
-combinación de sus ideas en una sola extensión:
+This project **would not exist without the prior work of these authors** — it is little
+more than a combination of their ideas in a single extension:
 
-| Proyecto | Autor | Qué se ha tomado de él |
+| Project | Author | What was taken from it |
 | --- | --- | --- |
-| [**model-context-tool-inspector**](https://github.com/beaufortfrancois/model-context-tool-inspector) | **François Beaufort** ([@beaufortfrancois](https://github.com/beaufortfrancois)) | El enfoque de inspección de WebMCP: inyectar en el *MAIN world* e interceptar `provideContext()` / `registerTool()` para descubrir y ejecutar las tools que declara una página. Licencia Apache-2.0. |
-| [**Page Assist**](https://github.com/n4ze3m/page-assist) | **Muhammed Nazeem** ([@n4ze3m](https://github.com/n4ze3m)) | La idea de un side panel de Chrome como cliente de Ollama en local, con descubrimiento de modelos y chat sobre la pestaña actual. Licencia MIT. |
-| [**WebMCP**](https://github.com/webmachinelearning/webmcp) | W3C Web Machine Learning CG | La especificación de la API que hace posible todo esto. |
-| [**Ollama**](https://github.com/ollama/ollama) | Ollama | El runtime local de modelos y su API de tool calling. |
+| [**model-context-tool-inspector**](https://github.com/beaufortfrancois/model-context-tool-inspector) | **François Beaufort** ([@beaufortfrancois](https://github.com/beaufortfrancois)) | The WebMCP inspection approach: inject into the *MAIN world* and wrap `provideContext()` / `registerTool()` to discover and execute the tools a page declares. Apache-2.0 licensed. |
+| [**Page Assist**](https://github.com/n4ze3m/page-assist) | **Muhammed Nazeem** ([@n4ze3m](https://github.com/n4ze3m)) | The idea of a Chrome side panel as a local Ollama client, with model discovery and chat about the current tab. MIT licensed. |
+| [**WebMCP**](https://github.com/webmachinelearning/webmcp) | W3C Web Machine Learning CG | The API specification that makes all of this possible. |
+| [**Ollama**](https://github.com/ollama/ollama) | Ollama | The local model runtime and its tool-calling API. |
 
-El código de este repositorio está escrito desde cero (no se ha copiado código de esos
-proyectos), pero el diseño está directamente inspirado en ellos. Si te resulta útil,
-ve primero a darles una estrella a ellos.
+The code in this repository is written from scratch — no code was copied from those
+projects — but the design is directly inspired by them. If you find this useful, go star
+theirs first.
 
 ---
 
-## Requisitos
+## Requirements
 
-- Chrome 116 o superior (side panel + content scripts en `world: "MAIN"`).
-- [Ollama](https://ollama.com) corriendo en local con al menos un modelo **con capacidad `tools`**:
+- Chrome 116 or newer (side panel + content scripts in `world: "MAIN"`).
+- [Ollama](https://ollama.com) running locally with at least one model that has the
+  **`tools`** capability:
 
 ```bash
 ollama pull qwen3:8b
 ```
 
-Modelos sin `tools` (por ejemplo los `-embed` o algunos gemma antiguos) aparecerán en el
-desplegable pero ignorarán las herramientas. El selector marca con `· tools` los que sí las soportan.
+Models without `tools` still show up in the picker but will silently ignore the tools.
+The picker marks the ones that do support them with `· tools`.
+
+- Ollama must allow the extension's origin. **This is the single most common setup
+  problem** — see [the Ollama 403](#the-ollama-403) below.
 
 ---
 
-## Instalación
+## Installation
 
-### Opción A — probarla en otra máquina (zip de la release)
+### Option A — trying it on another machine (release zip)
 
-No hace falta clonar nada ni tener node instalado:
+No cloning and no node required:
 
-1. Descarga el `.zip` de la [última release](https://github.com/molidestroyer/webmcp-local-agent/releases/latest).
-2. Descomprímelo en una carpeta.
-3. `chrome://extensions` → activa **Modo desarrollador** → **Cargar descomprimida** → esa carpeta.
+1. Download the `.zip` from the [latest release](https://github.com/molidestroyer/webmcp-local-agent/releases/latest).
+2. Unzip it into a folder.
+3. `chrome://extensions` → enable **Developer mode** → **Load unpacked** → pick that folder.
 
-> Chrome no instala `.zip` ni `.crx` de fuera de la Web Store: hay que descomprimir
-> y cargar la carpeta. Es un paso, pero es la única vía sin publicar en la Store.
+> Chrome does not install `.zip` or `.crx` files from outside the Web Store: you have to
+> unzip and load the folder. It is one extra step, but it is the only route that does not
+> involve publishing to the Store.
 
-### Opción B — desde el repo
+### Option B — from the repo
 
 ```bash
 git clone https://github.com/molidestroyer/webmcp-local-agent.git
 ```
 
-`chrome://extensions` → **Modo desarrollador** → **Cargar descomprimida** → la carpeta del repo.
+`chrome://extensions` → **Developer mode** → **Load unpacked** → the repo folder.
 
-Después, ancla el icono ⚡ a la barra y púlsalo: se abre el side panel.
+Then pin the ⚡ icon to the toolbar and click it to open the side panel.
 
-> Tras instalar o recargar la extensión, **refresca (F5) las pestañas ya abiertas**.
-> Los content scripts no se inyectan retroactivamente en páginas que ya estaban cargadas.
+> After installing or reloading the extension, **refresh (F5) any tabs that were already
+> open**. Content scripts are not injected retroactively into pages that had already loaded.
 
 ---
 
-## Build y distribución
+## Build and distribution
 
-No hay bundler ni dependencias: el "build" solo valida y empaqueta.
+There is no bundler and there are no dependencies: the "build" only validates and packages.
 
 ```bash
 pwsh ./build.ps1
 ```
 
-Genera `dist/webmcp-local-agent-<version>.zip` con `manifest.json` en la raíz —el formato
-que aceptan tanto **Cargar descomprimida** (tras descomprimir) como la Chrome Web Store—.
-Antes de comprimir comprueba la sintaxis de los `.js` con `node --check` y que todos los
-archivos declarados en el manifest existen de verdad.
+It produces `dist/webmcp-local-agent-<version>.zip` with `manifest.json` at the root —
+the layout accepted by both **Load unpacked** (after unzipping) and the Chrome Web Store.
+Before compressing it checks the `.js` files with `node --check` and verifies that every
+file the manifest declares actually exists.
 
-CI ([`.github/workflows/build.yml`](.github/workflows/build.yml)) ejecuta **ese mismo
-script** en cada push a `main` y sube el zip como artefacto. Para publicar una release:
+CI ([`.github/workflows/build.yml`](.github/workflows/build.yml)) runs **that same script**
+on every push to `main` and uploads the zip as an artifact. To publish a release:
 
 ```bash
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-El workflow verifica que el tag coincide con la `version` del `manifest.json` (falla si no)
-y crea la release de GitHub con el zip adjunto.
+The workflow verifies the tag matches the `version` in `manifest.json` (and fails if it
+does not), then creates the GitHub release with the zip attached.
 
 ---
 
-## Uso
+## Usage
 
-1. Abre una página que exponga tools WebMCP. Si no tienes ninguna a mano, usa la incluida:
-   abre `demo/webmcp-demo.html` en Chrome (arrastra el archivo a una pestaña).
-2. Pulsa el icono de la extensión.
-3. Elige modelo en el desplegable. Se guarda en `chrome.storage.local` y se recuerda.
-4. El badge de la cabecera indica cuántas tools se han detectado (`3 Tools detectadas`).
-   Púlsalo para ver el nombre y la descripción de cada una.
-5. Escribe. Si el modelo decide usar una herramienta, verás una tarjeta 🔧 con el nombre,
-   los argumentos JSON y el resultado; después el modelo redacta la respuesta final.
+1. Open a page that exposes WebMCP tools. If you have none at hand, use the bundled one:
+   open `demo/webmcp-demo.html` in Chrome (drag the file onto a tab).
+2. Click the extension icon.
+3. Pick a model. The choice is saved to `chrome.storage.local` and remembered.
+4. The header badge shows how many tools were detected (`3 tools detected`). Click it to
+   see each tool's name and description.
+5. Type. If the model decides to use a tool, you get a 🔧 card with its name, the JSON
+   arguments and the result; the model then writes the final answer.
 
-Con la demo incluida puedes probar: *«añade comprar pan»*, *«¿qué tengo pendiente?»*,
-*«marca la 1 como hecha»*, *«pon la página en modo oscuro»*.
+With the bundled demo you can try: *"add buy bread"*, *"what is still pending?"*,
+*"mark #1 as done"*, *"switch the page to dark mode"*.
 
-### Controles
+### Controls
 
-| Control | Qué hace |
+| Control | What it does |
 | --- | --- |
-| `<select>` de modelos | Lista lo que devuelve `GET /api/tags`. Selección persistida. |
-| 🔄 | Vuelve a consultar `/api/tags` (úsalo tras un `ollama pull` en terminal). |
-| Badge de tools | Muestra/oculta la lista de herramientas detectadas. |
-| ⟳ | Reinspecciona la pestaña activa. |
-| 🗑 | Vacía la conversación. |
-| ☑ Confirmar cada tool | Pide tu aprobación antes de ejecutar cada llamada. Desactivado por defecto. |
+| Model `<select>` | Lists whatever `GET /api/tags` returns. Selection is persisted. |
+| 🔄 | Queries `/api/tags` again (use it after an `ollama pull` in a terminal). |
+| Tools badge | Shows/hides the list of detected tools. |
+| ⟳ | Re-inspects the active tab. |
+| 🗑 | Clears the conversation. |
+| ☑ Confirm every tool | Asks for your approval before each call. Off by default. |
 
 ---
 
-## Cómo funciona
+## How it works
 
 ```
 sidepanel.js ──chrome.runtime──> background.js ──Port──> content.js ──postMessage──> page-hook.js
@@ -132,83 +137,82 @@ sidepanel.js ──chrome.runtime──> background.js ──Port──> content
    └── fetch() ──> Ollama 127.0.0.1:11434                        navigator.modelContext ─┘
 ```
 
-- **`page-hook.js`** se ejecuta en el *MAIN world* en `document_start`. Envuelve
-  `provideContext()`, `registerTool()` y `unregisterTool()` para llevar un registro de las
-  tools vivas, conservando la referencia real a cada función `execute`. Si la página las
-  registró antes de que pudiéramos engancharnos, hace *fallback* a leer `tools` /
-  `getTools()` / `listTools()`, y para ejecutar usa `callTool()` si existe.
-- **`content.js`** vive en el mundo aislado y abre un `Port` **hacia** el service worker.
-  Por eso la extensión **no necesita `host_permissions` sobre las páginas que visitas**:
-  nunca se hace `tabs.sendMessage`.
-- **`background.js`** mantiene el mapa `tabId → Port` y enruta petición/respuesta. Si la
-  pestaña no tiene puente (pestaña abierta antes de instalar), lo inyecta con
-  `chrome.scripting.executeScript` aprovechando `activeTab`.
-- **`sidepanel.js`** traduce cada tool WebMCP al formato de Ollama
-  (`{ type: "function", function: { name, description, parameters } }`), llama a
-  `POST /api/chat` con `stream: true`, acumula `tool_calls`, las ejecuta en la página,
-  añade el resultado como mensaje `role: "tool"` y vuelve a llamar al modelo.
-  Máximo 6 rondas por turno.
+- **`page-hook.js`** runs in the *MAIN world* at `document_start`. It wraps
+  `provideContext()`, `registerTool()` and `unregisterTool()` to track the live tools,
+  keeping the real reference to each `execute` function. If the page registered them
+  before we could hook in, it falls back to reading `tools` / `getTools()` / `listTools()`,
+  and uses `callTool()` to execute when available.
+- **`content.js`** lives in the isolated world and opens a `Port` **towards** the service
+  worker. That is why the extension **needs no host permissions over the pages you visit**:
+  `tabs.sendMessage` is never used.
+- **`background.js`** keeps the `tabId → Port` map and routes request/response. If a tab
+  has no bridge (it was open before the extension was installed), it injects one with
+  `chrome.scripting.executeScript`, relying on `activeTab`.
+- **`sidepanel.js`** translates each WebMCP tool into Ollama's format
+  (`{ type: "function", function: { name, description, parameters } }`), calls
+  `POST /api/chat` with `stream: true`, accumulates `tool_calls`, runs them on the page,
+  appends the result as a `role: "tool"` message and calls the model again.
+  Six rounds per turn, maximum.
 
-El *streaming* también muestra el bloque `thinking` de los modelos que razonan
-(qwen3, gemma con thinking) en un desplegable colapsado.
-
----
-
-## Notas de seguridad
-
-- **Las definiciones de tools vienen de la página web, que es contenido no confiable.**
-  Una página puede declarar una herramienta con la descripción que quiera para intentar
-  inducir al modelo a llamarla. Si vas a usar esto en sitios que no controlas, activa
-  **«Confirmar cada tool»**.
-- El canal MAIN ↔ ISOLATED usa `window.postMessage`, así que la propia página puede ver
-  (y en teoría falsificar) esos mensajes. Es una limitación inherente a inspeccionar una
-  API que vive en el mundo de la página.
-- La extensión solo tiene permiso de red hacia `localhost:11434` / `127.0.0.1:11434`.
+Streaming also surfaces the `thinking` block of reasoning models (qwen3, gemma with
+thinking) inside a collapsed disclosure.
 
 ---
 
-## Problemas frecuentes
+## Security notes
 
-| Síntoma | Causa → Solución |
+- **Tool definitions come from the web page, which is untrusted content.** A page can
+  declare a tool with any description it likes in order to nudge the model into calling it.
+  If you use this on sites you do not control, turn on **"Confirm every tool"**.
+- The MAIN ↔ ISOLATED channel uses `window.postMessage`, so the page itself can observe
+  (and in theory forge) those messages. That is inherent to inspecting an API that lives
+  in the page's own world.
+- The extension's only network permission is `localhost:11434` / `127.0.0.1:11434`.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause → Fix |
 | --- | --- |
-| **Los modelos cargan pero al enviar sale `403`** | El caso más frecuente. Ver abajo. |
-| «Ollama no detectado» | El servicio no está arrancado → `ollama serve`, luego 🔄. |
-| «0 Tools» en una página que sí las tiene | La pestaña se cargó antes de instalar la extensión → F5. |
-| «No se pudo conectar con la pestaña» | Páginas `chrome://`, `chrome-extension://` y la Chrome Web Store no admiten content scripts. |
-| El modelo ignora las herramientas | Ese modelo no tiene capacidad `tools` → elige uno marcado con `· tools`. |
+| **Models load but sending returns `403`** | The most common one. See below. |
+| "Ollama not detected" | The service is not running → `ollama serve`, then 🔄. |
+| "0 tools" on a page that does have them | The tab was loaded before the extension was installed → F5. |
+| "Could not connect to the tab" | `chrome://`, `chrome-extension://` pages and the Chrome Web Store do not allow content scripts. |
+| The model ignores the tools | That model lacks the `tools` capability → pick one marked `· tools`. |
 
-### El `403` de Ollama (léelo antes de abrir un issue)
+### The Ollama 403
 
-Ollama solo acepta peticiones desde los orígenes de `OLLAMA_ORIGINS`, y
-`chrome-extension://` **no está en la lista por defecto**. El síntoma despista porque
-falla a medias: Chrome no añade la cabecera `Origin` al `GET /api/tags` (no lleva
-cabeceras propias), así que **la lista de modelos carga bien**; pero el `POST /api/chat`
-sí manda `Content-Type: application/json`, Chrome añade `Origin` y Ollama devuelve `403`.
+Ollama only accepts requests from the origins in `OLLAMA_ORIGINS`, and
+`chrome-extension://` **is not on the default list**. The symptom is confusing because it
+fails halfway: Chrome does not attach an `Origin` header to `GET /api/tags` (it carries no
+headers of its own), so **the model list loads fine**; but `POST /api/chat` does send
+`Content-Type: application/json`, Chrome adds `Origin`, and Ollama returns `403`.
 
-Comprobado contra Ollama 0.32.15:
+Verified against Ollama 0.32.15:
 
-| Petición | Código |
+| Request | Status |
 | --- | --- |
-| `POST /api/chat` sin `Origin` | `200` |
-| `POST /api/chat` con `Origin: chrome-extension://…` | `403` |
+| `POST /api/chat` without `Origin` | `200` |
+| `POST /api/chat` with `Origin: chrome-extension://…` | `403` |
 
-Solución, en Windows:
+Fix, on Windows:
 
 ```bash
 setx OLLAMA_ORIGINS "chrome-extension://*"
 ```
 
-y **reinicia Ollama** desde el icono de la bandeja — `setx` solo afecta a procesos nuevos,
-no al que ya está corriendo. En Linux/macOS, `export OLLAMA_ORIGINS='chrome-extension://*'`
-antes de `ollama serve` (o `systemctl edit ollama` si va como servicio).
+then **restart Ollama** from the tray icon — `setx` only affects newly started processes,
+not the one already running. On Linux/macOS, `export OLLAMA_ORIGINS='chrome-extension://*'`
+before `ollama serve` (or `systemctl edit ollama` if it runs as a service).
 
-> La extensión **no** intenta esquivar esto borrando la cabecera `Origin` con
-> `declarativeNetRequest`. Sería posible, pero esa regla se aplicaría también a las
-> peticiones de cualquier web que visites, y dejaría tu Ollama local accesible desde
-> cualquier página. Es preferible el cambio explícito de configuración.
+> The extension deliberately does **not** work around this by stripping the `Origin`
+> header with `declarativeNetRequest`. It would be possible, but that rule would also
+> apply to requests from any website you visit, leaving your local Ollama reachable from
+> any page. An explicit configuration change is the better trade-off.
 
 ---
 
-## Licencia
+## License
 
-MIT — ver [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

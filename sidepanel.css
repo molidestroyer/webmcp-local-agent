@@ -68,7 +68,7 @@ body {
   border: 0;
 }
 
-/* --- Barra superior ------------------------------------------------------ */
+/* --- Top bar ------------------------------------------------------ */
 
 .topbar {
   flex: 0 0 auto;
@@ -264,7 +264,7 @@ body {
 
 @keyframes blink { 50% { opacity: 0; } }
 
-/* --- Bloques de tool calling --------------------------------------------- */
+/* --- Tool call blocks --------------------------------------------- */
 
 .toolcall {
   align-self: stretch;

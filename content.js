@@ -1,10 +1,10 @@
 /**
  * WebMCP Local Agent - content.js
  *
- * Puente entre el MAIN world (page-hook.js, que ve la API WebMCP real) y el
- * service worker de la extension. El content script abre el puerto hacia la
- * extension, asi que nunca hace falta `tabs.sendMessage` ni permisos de host
- * sobre las paginas visitadas.
+ * Bridge between the MAIN world (page-hook.js, which sees the real WebMCP API)
+ * and the extension's service worker. The content script opens the port
+ * *towards* the extension, so we never need `tabs.sendMessage` nor host
+ * permissions over the pages the user visits.
  */
 (() => {
   'use strict';
@@ -40,12 +40,12 @@
           result: answer.result,
           error: answer.error,
         });
-      } catch (_) { /* el panel se cerro */ }
+      } catch (_) { /* the panel was closed */ }
     });
 
     port.onDisconnect.addListener(() => {
       port = null;
-      // El service worker puede dormirse; reconectamos al proximo evento.
+      // The service worker can go to sleep; reconnect for the next event.
       setTimeout(connect, 1000);
     });
   }
@@ -55,7 +55,7 @@
       const id = Date.now() + '-' + (++seq);
       const timer = setTimeout(() => {
         pending.delete(id);
-        resolve({ result: null, error: 'La pagina no respondio a tiempo.' });
+        resolve({ result: null, error: 'The page did not respond in time.' });
       }, PAGE_TIMEOUT_MS);
 
       pending.set(id, (data) => {

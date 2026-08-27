@@ -1,101 +1,103 @@
 # CLAUDE.md — WebMCP Local Agent
 
-## Qué es
+## What this is
 
-Extensión de Chrome MV3 que abre un side panel con dos cosas conectadas entre sí:
+A Chrome MV3 extension whose side panel wires together two things:
 
-1. **Inspector WebMCP** — descubre las tools que la pestaña activa registra en
-   `navigator.modelContext` / `window.modelContext` y sabe ejecutarlas.
-2. **Cliente de Ollama local** (`127.0.0.1:11434`) — chat con selector dinámico de
-   modelos descargados y **tool calling**: el modelo llama a las tools de la web,
-   se ejecutan en el DOM y el resultado vuelve al modelo para que redacte la respuesta.
+1. **WebMCP inspector** — discovers the tools the active tab registers on
+   `navigator.modelContext` / `window.modelContext`, and knows how to run them.
+2. **Local Ollama client** (`127.0.0.1:11434`) — chat with a dynamic picker of pulled
+   models and **tool calling**: the model calls the page's tools, they execute against the
+   DOM, and the result goes back to the model so it can write the final answer.
 
-JS vanilla, sin bundler ni dependencias. El "build" (`build.ps1`) solo valida y comprime.
-Todo es local: el único destino de red es Ollama.
+Vanilla JS, no bundler, no dependencies. The "build" (`build.ps1`) only validates and zips.
+Everything is local: the only network destination is Ollama.
+
+Repo language is **English** — code, comments, UI strings, docs and commit messages.
 
 ## Repo
 
-- Remote: **`https://github.com/molidestroyer/webmcp-local-agent`** (público).
-- ⚠️ La cuenta es **`molidestroyer`**, no `miguelmolinamontilla`. Son dos cuentas
-  distintas de Miguel; la principal (CV y demás repos) y las credenciales guardadas en
-  el Git Credential Manager de esta máquina son las de `molidestroyer`. Empujar a la
-  otra cuenta falla con 403.
-- Publicado: `v0.1.0`, con el zip adjunto en Releases.
+- Remote: **`https://github.com/molidestroyer/webmcp-local-agent`** (public).
+- ⚠️ The account is **`molidestroyer`**, not `miguelmolinamontilla`. Those are two
+  different accounts of Miguel's; the main one (CV and the rest of his repos) and the
+  credentials stored in this machine's Git Credential Manager both belong to
+  `molidestroyer`. Pushing to the other account fails with 403.
+- Published: `v0.1.0`, with the zip attached to the release.
 
-## Estructura
+## Layout
 
-| Archivo | Mundo | Responsabilidad |
+| File | World | Responsibility |
 | --- | --- | --- |
-| `manifest.json` | — | MV3. Permisos: `sidePanel`, `activeTab`, `scripting`, `storage`, `tabs`. Host permissions **solo** hacia `11434`. |
-| `page-hook.js` | MAIN | Envuelve `provideContext` / `registerTool` / `unregisterTool` para registrar tools y guardar la referencia real a `execute`. Responde a `list` y `execute` por `postMessage`. |
-| `content.js` | ISOLATED | Puente. Abre `chrome.runtime.connect({name:'webmcp-bridge'})` **hacia** el SW. |
-| `background.js` | SW | Mapa `tabId → Port`, enrutado request/response con timeout, `sidePanel.setPanelBehavior`, inyección de rescate vía `scripting.executeScript`. |
-| `sidepanel.{html,css,js}` | panel | UI + ciclo de tool calling contra `/api/chat`. |
-| `demo/webmcp-demo.html` | — | Página de prueba con polyfill de `navigator.modelContext` y 4 tools. |
-| `build.ps1` | — | Valida + empaqueta a `dist/webmcp-local-agent-<version>.zip`. |
-| `.github/workflows/build.yml` | — | CI: ejecuta `build.ps1` (pwsh está preinstalado en `ubuntu-latest`), sube artefacto y publica release en tags `v*`. |
+| `manifest.json` | — | MV3. Permissions: `sidePanel`, `activeTab`, `scripting`, `storage`, `tabs`. Host permissions **only** towards `11434`. |
+| `page-hook.js` | MAIN | Wraps `provideContext` / `registerTool` / `unregisterTool` to track tools and keep the real reference to `execute`. Answers `list` and `execute` over `postMessage`. |
+| `content.js` | ISOLATED | Bridge. Opens `chrome.runtime.connect({name:'webmcp-bridge'})` **towards** the SW. |
+| `background.js` | SW | `tabId → Port` map, request/response routing with timeouts, `sidePanel.setPanelBehavior`, rescue injection via `scripting.executeScript`. |
+| `sidepanel.{html,css,js}` | panel | UI + tool-calling loop against `/api/chat`. |
+| `demo/webmcp-demo.html` | — | Test page with a `navigator.modelContext` polyfill and 4 tools. |
+| `build.ps1` | — | Validates + packages into `dist/webmcp-local-agent-<version>.zip`. |
+| `.github/workflows/build.yml` | — | CI: runs `build.ps1` (pwsh is preinstalled on `ubuntu-latest`), uploads the artifact and publishes a release on `v*` tags. |
 
-## Decisiones que conviene no deshacer
+## Decisions worth not undoing
 
-- **El content script conecta hacia el SW**, nunca al revés. Eso evita necesitar
-  `host_permissions: ["<all_urls>"]` (no se usa `tabs.sendMessage`). Si algún día se
-  cambia, el manifest necesitará ese permiso y Chrome mostrará el aviso de "leer todos
-  tus datos en todos los sitios".
-- **`world: "MAIN"` en `content_scripts`**, no inyección de `<script>`: la CSP de muchas
-  páginas bloquea la segunda vía.
-- **`document_start`** es obligatorio: si la página llama a `provideContext()` antes de
-  que enganchemos, solo quedaría el fallback de leer `tools`/`getTools()`, que muchas
-  implementaciones no exponen.
-- `page-hook.js` pasa a `execute()` un objeto que sirve tanto para `execute(args)` como
-  para `execute({ name, arguments })`, porque las implementaciones difieren.
-- Todo lo que cruza `postMessage` pasa por `JSON.parse(JSON.stringify(...))`: los
-  resultados de tools pueden traer funciones o nodos DOM y romperían `structuredClone`.
+- **The content script connects towards the SW**, never the other way round. That avoids
+  needing `host_permissions: ["<all_urls>"]` (no `tabs.sendMessage`). If this ever
+  changes, the manifest will need that permission and Chrome will show the "read all your
+  data on all websites" warning.
+- **`world: "MAIN"` in `content_scripts`**, not `<script>` injection: many pages' CSP
+  blocks the latter.
+- **`document_start`** is mandatory: if the page calls `provideContext()` before we hook
+  in, the only fallback left is reading `tools`/`getTools()`, which many implementations
+  do not expose.
+- `page-hook.js` passes `execute()` an object that works both for `execute(args)` and for
+  `execute({ name, arguments })`, because implementations differ.
+- Everything crossing `postMessage` goes through `JSON.parse(JSON.stringify(...))`: tool
+  results may carry functions or DOM nodes and would break `structuredClone`.
 
 ## Gotchas
 
-- Tras recargar la extensión hay que **F5 en las pestañas abiertas**; los content scripts
-  no se reinyectan solos.
-- El SW se duerme: `content.js` reconecta el puerto en `onDisconnect` con 1 s de retardo.
-- **`403` de Ollama**: `chrome-extension://` no está en `OLLAMA_ORIGINS` por defecto.
-  Despista porque falla a medias: Chrome no añade `Origin` al `GET /api/tags` (va sin
-  cabeceras) y los modelos cargan, pero el `POST /api/chat` lleva `Content-Type` → Chrome
-  añade `Origin` → 403. Verificado en Ollama 0.32.15: mismo POST sin `Origin` da 200.
-  Solución: `setx OLLAMA_ORIGINS "chrome-extension://*"` + reiniciar Ollama.
-  Decisión consciente: **no** se esquiva borrando `Origin` con `declarativeNetRequest`,
-  porque esa regla afectaría también a las peticiones de cualquier web y expondría el
-  Ollama local a cualquier página.
-- El streaming de `/api/chat` es NDJSON; `tool_calls` llega como objeto completo en un
-  chunk, no como deltas → se acumula con `push(...)`.
-- Los modelos sin capacidad `tools` (ver `/api/tags` → `capabilities`) ignoran el array
-  de herramientas sin dar error.
+- After reloading the extension you must **F5 the open tabs**; content scripts are not
+  re-injected on their own.
+- The SW sleeps: `content.js` reconnects the port on `onDisconnect` after 1 s.
+- **Ollama `403`**: `chrome-extension://` is not in `OLLAMA_ORIGINS` by default. It is
+  confusing because it fails halfway: Chrome does not add `Origin` to `GET /api/tags`
+  (no headers of its own) so the models load, but `POST /api/chat` carries `Content-Type`
+  → Chrome adds `Origin` → 403. Verified on Ollama 0.32.15: the same POST without
+  `Origin` returns 200. Fix: `setx OLLAMA_ORIGINS "chrome-extension://*"` + restart Ollama.
+  Deliberate decision: this is **not** worked around by stripping `Origin` with
+  `declarativeNetRequest`, because that rule would also apply to requests from any website
+  visited and would expose the local Ollama to any page.
+- `/api/chat` streaming is NDJSON; `tool_calls` arrive as a complete object in a single
+  chunk, not as deltas → accumulated with `push(...)`.
+- Models without the `tools` capability (see `/api/tags` → `capabilities`) ignore the tool
+  array without raising an error.
 
-## Probar
+## Running it
 
 ```bash
 ollama serve
 ```
 
-`chrome://extensions` → Modo desarrollador → Cargar descomprimida → carpeta del repo.
-Abrir `demo/webmcp-demo.html` y pedir «añade comprar pan».
+`chrome://extensions` → Developer mode → Load unpacked → the repo folder.
+Open `demo/webmcp-demo.html` and ask it to "add buy bread".
 
-## Empaquetar y publicar
+## Packaging and publishing
 
 ```bash
 pwsh ./build.ps1
 ```
 
-- El zip debe llevar `manifest.json` **en la raíz**, no dentro de una subcarpeta, o Chrome
-  y la Web Store lo rechazan. Por eso se comprime `$staging\*` y no la carpeta.
-- `$include` en `build.ps1` es una lista blanca: **si añades un archivo nuevo que se
-  distribuye, hay que meterlo ahí** o no llegará al zip (el script falla si un archivo
-  listado no existe, pero no avisa de los que faltan por listar).
-- Release: `git tag vX.Y.Z && git push origin vX.Y.Z`. El workflow aborta si el tag no
-  coincide con `version` del manifest, así que **sube la versión del manifest primero**.
-- Chrome no permite instalar `.zip`/`.crx` fuera de la Web Store: la distribución real es
-  descargar el zip de la release, descomprimir y "Cargar descomprimida".
+- The zip must carry `manifest.json` **at its root**, not inside a subfolder, or Chrome
+  and the Web Store reject it. That is why `$staging\*` is compressed, not the folder.
+- `$include` in `build.ps1` is an allowlist: **if you add a new file that ships, it has to
+  go in there** or it will not reach the zip (the script fails when a listed file is
+  missing, but it cannot warn about files nobody listed).
+- Release: `git tag vX.Y.Z && git push origin vX.Y.Z`. The workflow aborts if the tag does
+  not match the manifest `version`, so **bump the manifest version first**.
+- Chrome cannot install `.zip`/`.crx` from outside the Web Store: real distribution is
+  download the release zip, unzip, "Load unpacked".
 
-## Créditos (mantener visibles)
+## Credits (keep them visible)
 
-El README atribuye explícitamente a **François Beaufort**
-(`beaufortfrancois/model-context-tool-inspector`, Apache-2.0) y a **n4ze3m**
-(`page-assist`, MIT). No quitar esa sección ni la nota de créditos del side panel.
+The README explicitly credits **François Beaufort**
+(`beaufortfrancois/model-context-tool-inspector`, Apache-2.0) and **n4ze3m**
+(`page-assist`, MIT). Do not remove that section nor the credits note in the side panel.

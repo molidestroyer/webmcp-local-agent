@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Demo WebMCP · lista de tareas</title>
+<title>WebMCP demo · todo list</title>
 <style>
   :root { color-scheme: light dark; }
   body {
@@ -21,29 +21,29 @@
 </style>
 </head>
 <body>
-  <h1>Demo WebMCP · lista de tareas</h1>
+  <h1>WebMCP demo · todo list</h1>
   <p class="muted">
-    Esta página registra cuatro herramientas en <code>navigator.modelContext</code>.
-    Abre el side panel de <strong>WebMCP Local Agent</strong> y pídele cosas como
-    «añade comprar pan», «marca la 2 como hecha» o «¿qué me queda pendiente?».
+    This page registers four tools on <code>navigator.modelContext</code>.
+    Open the <strong>WebMCP Local Agent</strong> side panel and ask for things like
+    "add buy bread", "mark #2 as done" or "what is still pending?".
   </p>
 
   <div class="card">
-    <strong>Tareas</strong>
+    <strong>Todos</strong>
     <ul id="list"></ul>
     <p class="muted" id="counter"></p>
   </div>
 
   <div class="card">
-    <strong>Tema de la página</strong>
-    <p class="muted">El agente puede cambiarlo con la tool <code>set-theme</code>.</p>
+    <strong>Page theme</strong>
+    <p class="muted">The agent can switch it with the <code>set-theme</code> tool.</p>
   </div>
 
 <script>
-// --- Estado de la página ---------------------------------------------------
+// --- Page state ------------------------------------------------------------
 const todos = [
-  { id: 1, text: 'Probar WebMCP con Ollama', done: false },
-  { id: 2, text: 'Escribir el README', done: true },
+  { id: 1, text: 'Try WebMCP with Ollama', done: false },
+  { id: 2, text: 'Write the README', done: true },
 ];
 let nextId = 3;
 
@@ -57,11 +57,11 @@ function render() {
     list.appendChild(li);
   }
   const pending = todos.filter((t) => !t.done).length;
-  document.getElementById('counter').textContent = pending + ' pendiente(s) de ' + todos.length;
+  document.getElementById('counter').textContent = pending + ' pending of ' + todos.length;
 }
 render();
 
-// --- Polyfill mínimo de WebMCP para navegadores sin la API nativa ----------
+// --- Minimal WebMCP polyfill for browsers without the native API -----------
 if (!('modelContext' in navigator)) {
   const registered = [];
   navigator.modelContext = {
@@ -77,7 +77,7 @@ if (!('modelContext' in navigator)) {
     },
     async callTool(name, args) {
       const tool = registered.find((entry) => entry.name === name);
-      if (!tool) throw new Error('Tool desconocida: ' + name);
+      if (!tool) throw new Error('Unknown tool: ' + name);
       return tool.execute(args);
     },
   };
@@ -85,53 +85,53 @@ if (!('modelContext' in navigator)) {
 
 const text = (value) => ({ content: [{ type: 'text', text: value }] });
 
-// --- Herramientas ----------------------------------------------------------
+// --- Tools -----------------------------------------------------------------
 navigator.modelContext.provideContext({
   tools: [
     {
       name: 'list-todos',
-      description: 'Devuelve todas las tareas de la lista con su id y su estado.',
+      description: 'Returns every todo in the list with its id and status.',
       inputSchema: { type: 'object', properties: {}, required: [] },
       async execute() {
-        if (!todos.length) return text('La lista está vacía.');
-        return text(todos.map((t) => '#' + t.id + ' [' + (t.done ? 'hecha' : 'pendiente') + '] ' + t.text).join('\n'));
+        if (!todos.length) return text('The list is empty.');
+        return text(todos.map((t) => '#' + t.id + ' [' + (t.done ? 'done' : 'pending') + '] ' + t.text).join('\n'));
       },
     },
     {
       name: 'add-todo',
-      description: 'Añade una nueva tarea a la lista.',
+      description: 'Adds a new todo to the list.',
       inputSchema: {
         type: 'object',
-        properties: { text: { type: 'string', description: 'Texto de la tarea' } },
+        properties: { text: { type: 'string', description: 'Text of the todo' } },
         required: ['text'],
       },
       async execute({ text: value }) {
-        if (!value) throw new Error('Falta el texto de la tarea.');
+        if (!value) throw new Error('The todo text is missing.');
         const todo = { id: nextId++, text: String(value), done: false };
         todos.push(todo);
         render();
-        return text('Tarea #' + todo.id + ' añadida: ' + todo.text);
+        return text('Todo #' + todo.id + ' added: ' + todo.text);
       },
     },
     {
       name: 'complete-todo',
-      description: 'Marca una tarea como completada a partir de su id.',
+      description: 'Marks a todo as completed, given its id.',
       inputSchema: {
         type: 'object',
-        properties: { id: { type: 'number', description: 'Id de la tarea' } },
+        properties: { id: { type: 'number', description: 'Id of the todo' } },
         required: ['id'],
       },
       async execute({ id }) {
         const todo = todos.find((entry) => entry.id === Number(id));
-        if (!todo) throw new Error('No existe la tarea #' + id);
+        if (!todo) throw new Error('There is no todo #' + id);
         todo.done = true;
         render();
-        return text('Tarea #' + todo.id + ' marcada como hecha.');
+        return text('Todo #' + todo.id + ' marked as done.');
       },
     },
     {
       name: 'set-theme',
-      description: 'Cambia el tema visual de la página entre claro y oscuro.',
+      description: 'Switches the page theme between light and dark.',
       inputSchema: {
         type: 'object',
         properties: { theme: { type: 'string', enum: ['light', 'dark'] } },
@@ -142,7 +142,7 @@ navigator.modelContext.provideContext({
         document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
         document.body.style.background = dark ? '#111318' : '#ffffff';
         document.body.style.color = dark ? '#e7e9ee' : '#16181d';
-        return text('Tema cambiado a ' + (dark ? 'oscuro' : 'claro') + '.');
+        return text('Theme switched to ' + (dark ? 'dark' : 'light') + '.');
       },
     },
   ],

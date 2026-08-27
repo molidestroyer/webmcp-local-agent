@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-  Empaqueta la extension en dist/webmcp-local-agent-<version>.zip
+  Packages the extension into dist/webmcp-local-agent-<version>.zip
 
 .DESCRIPTION
-  Valida el manifest y la sintaxis de los .js (si hay node), copia solo los
-  archivos que se distribuyen a una carpeta temporal y genera el zip con
-  manifest.json en la raiz, que es lo que espera tanto "Cargar descomprimida"
-  como la Chrome Web Store.
+  Validates the manifest and the syntax of the .js files (when node is
+  available), copies only the shipping files into a staging folder and produces
+  a zip with manifest.json at its root, which is what both "Load unpacked" and
+  the Chrome Web Store expect.
 
 .EXAMPLE
   pwsh ./build.ps1
@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $dist = Join-Path $root 'dist'
 
-# Archivos y carpetas que van dentro del zip. Todo lo demas queda fuera.
+# Files and folders that go inside the zip. Everything else stays out.
 $include = @(
   'manifest.json',
   'background.js',
@@ -36,12 +36,12 @@ $include = @(
   'demo'
 )
 
-# --- Validacion ------------------------------------------------------------
+# --- Validation ------------------------------------------------------------
 
 $manifestPath = Join-Path $root 'manifest.json'
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 $version = $manifest.version
-if (-not $version) { throw "manifest.json no tiene 'version'." }
+if (-not $version) { throw "manifest.json has no 'version'." }
 Write-Host "WebMCP Local Agent v$version" -ForegroundColor Cyan
 
 if (-not $SkipChecks) {
@@ -49,26 +49,26 @@ if (-not $SkipChecks) {
   if ($node) {
     foreach ($file in @('background.js', 'content.js', 'page-hook.js', 'sidepanel.js')) {
       & node --check (Join-Path $root $file)
-      if ($LASTEXITCODE -ne 0) { throw "Error de sintaxis en $file" }
+      if ($LASTEXITCODE -ne 0) { throw "Syntax error in $file" }
     }
-    Write-Host "  sintaxis JS ok" -ForegroundColor DarkGray
+    Write-Host "  js syntax ok" -ForegroundColor DarkGray
   } else {
-    Write-Warning "node no encontrado: se omite la comprobacion de sintaxis."
+    Write-Warning "node not found: skipping the syntax check."
   }
 
-  # Todo lo que declara el manifest tiene que existir de verdad.
+  # Everything the manifest declares must actually exist.
   $declared = @($manifest.background.service_worker, $manifest.side_panel.default_path)
   $declared += $manifest.content_scripts.js
   $declared += $manifest.icons.PSObject.Properties.Value
   foreach ($rel in ($declared | Where-Object { $_ } | Select-Object -Unique)) {
     if (-not (Test-Path (Join-Path $root $rel))) {
-      throw "El manifest declara '$rel' pero el archivo no existe."
+      throw "The manifest declares '$rel' but the file does not exist."
     }
   }
-  Write-Host "  referencias del manifest ok" -ForegroundColor DarkGray
+  Write-Host "  manifest references ok" -ForegroundColor DarkGray
 }
 
-# --- Empaquetado -----------------------------------------------------------
+# --- Packaging -------------------------------------------------------------
 
 $staging = Join-Path ([System.IO.Path]::GetTempPath()) ("webmcp-build-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
@@ -76,7 +76,7 @@ New-Item -ItemType Directory -Path $staging -Force | Out-Null
 try {
   foreach ($item in $include) {
     $source = Join-Path $root $item
-    if (-not (Test-Path $source)) { throw "Falta '$item' en el repositorio." }
+    if (-not (Test-Path $source)) { throw "'$item' is missing from the repository." }
     Copy-Item -Path $source -Destination $staging -Recurse -Force
   }
 
@@ -89,7 +89,7 @@ try {
   $size = [math]::Round((Get-Item $zip).Length / 1KB, 1)
   Write-Host "  -> $zip ($size KB)" -ForegroundColor Green
   Write-Host ""
-  Write-Host "Para instalarlo: descomprimir y en chrome://extensions usar 'Cargar descomprimida'." -ForegroundColor DarkGray
+  Write-Host "To install: unzip it and use 'Load unpacked' on chrome://extensions." -ForegroundColor DarkGray
 }
 finally {
   Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue

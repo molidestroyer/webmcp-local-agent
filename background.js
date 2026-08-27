@@ -1,9 +1,8 @@
 /**
- * WebMCP Local Agent - background.js (service worker, MV3)
+ * WebMCP Local Agent - background.js (MV3 service worker)
  *
- * Enruta las peticiones del side panel hacia el content script de cada pestana
- * y mantiene el mapa tabId -> puerto. Tambien abre el side panel al pulsar el
- * icono de la extension.
+ * Routes side panel requests to each tab's content script and keeps the
+ * tabId -> port map. Also opens the side panel when the toolbar icon is clicked.
  */
 
 const BRIDGE_TIMEOUT_MS = 35000;
@@ -48,8 +47,9 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 /**
- * Inyecta el hook y el puente en pestanas abiertas antes de instalar/recargar
- * la extension. Requiere activeTab (concedido al pulsar el icono).
+ * Injects the hook and the bridge into tabs that were already open before the
+ * extension was installed or reloaded. Relies on activeTab, granted when the
+ * user clicks the extension icon.
  */
 async function ensureInjected(tabId) {
   try {
@@ -67,7 +67,7 @@ async function ensureInjected(tabId) {
     return false;
   }
 
-  // El content script se conecta de forma asincrona tras ejecutarse.
+  // The content script connects asynchronously after it runs.
   for (let attempt = 0; attempt < 20; attempt++) {
     if (ports.has(tabId)) return true;
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -77,7 +77,7 @@ async function ensureInjected(tabId) {
 
 async function bridge(tabId, action, payload) {
   if (typeof tabId !== 'number') {
-    return { result: null, error: 'No hay ninguna pestana activa.' };
+    return { result: null, error: 'There is no active tab.' };
   }
 
   if (!ports.has(tabId)) await ensureInjected(tabId);
@@ -85,8 +85,8 @@ async function bridge(tabId, action, payload) {
   if (!port) {
     return {
       result: null,
-      error: 'No se pudo conectar con la pestana. Recargala (F5) e intentalo de nuevo. '
-        + 'Las paginas internas de Chrome y la Chrome Web Store no admiten extensiones.',
+      error: 'Could not connect to the tab. Reload it (F5) and try again. '
+        + 'Chrome internal pages and the Chrome Web Store do not allow extensions.',
     };
   }
 
@@ -94,7 +94,7 @@ async function bridge(tabId, action, payload) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       waiting.delete(id);
-      resolve({ result: null, error: 'La pestana no respondio a tiempo.' });
+      resolve({ result: null, error: 'The tab did not respond in time.' });
     }, BRIDGE_TIMEOUT_MS);
 
     waiting.set(id, (message) => {
@@ -115,5 +115,5 @@ async function bridge(tabId, action, payload) {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.type !== 'bridge') return undefined;
   bridge(message.tabId, message.action, message.payload).then(sendResponse);
-  return true; // respuesta asincrona
+  return true; // async response
 });
