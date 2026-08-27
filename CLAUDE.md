@@ -70,6 +70,11 @@ Repo language is **English** — code, comments, UI strings, docs and commit mes
   chunk, not as deltas → accumulated with `push(...)`.
 - Models without the `tools` capability (see `/api/tags` → `capabilities`) ignore the tool
   array without raising an error.
+- **`.chat > * { flex: 0 0 auto; }` is load-bearing.** `.chat` is a flex column, so its
+  children default to `flex-shrink: 1` and get squeezed once the conversation overflows
+  instead of letting `.chat` scroll. Because `.toolcall` clips with `overflow: hidden`
+  (needed for the `border-radius`), squeezing collapsed it to a 2px yellow line — measured,
+  not guessed. Any new direct child of `.chat` needs the same treatment.
 
 ## Running it
 

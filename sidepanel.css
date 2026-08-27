@@ -175,6 +175,12 @@ body {
   gap: 10px;
 }
 
+/* .chat is a flex column, so its children default to flex-shrink: 1 and get
+   squeezed once the conversation overflows instead of letting .chat scroll.
+   A .toolcall clips with overflow:hidden, so squeezing collapses it into a thin
+   line. Every chat child must keep its natural height. */
+.chat > * { flex: 0 0 auto; }
+
 .empty {
   margin: auto 0;
   text-align: center;
@@ -296,7 +302,9 @@ body {
   padding: 7px;
   background: rgba(127, 127, 127, 0.14);
   border-radius: 6px;
-  overflow-x: auto;
+  /* Both axes: with max-height and overflow-x only, a long tool result was
+     silently cut off instead of scrolling. */
+  overflow: auto;
   font-family: var(--mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
