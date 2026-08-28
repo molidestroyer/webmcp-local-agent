@@ -1,6 +1,6 @@
 {
   "name": "webmcp-local-agent",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "description": "Chrome MV3 extension: local Ollama chat with WebMCP tool calling.",
   "license": "MIT",

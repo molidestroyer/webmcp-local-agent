@@ -447,6 +447,40 @@ function createToolListItem(tool) {
     }
     params.appendChild(pills);
     inner.appendChild(params);
+
+    // Properties without declared choices keep the pill row above and nothing
+    // else; only the constrained ones get a line here.
+    const constrained = props
+      .map((key) => ({ key, choices: S.getDisplayChoices(propertyDef(schema, key)) }))
+      .filter((entry) => entry.choices.length);
+
+    if (constrained.length) {
+      const options = makeSection('Options');
+      for (const entry of constrained) {
+        const row = document.createElement('div');
+        row.className = 'choice-row';
+
+        const name = document.createElement('div');
+        name.className = 'choice-row__name';
+        name.textContent = entry.key;
+
+        const values = document.createElement('div');
+        values.className = 'pills';
+        for (const choice of entry.choices) {
+          const chip = document.createElement('span');
+          chip.className = 'pill pill--choice';
+          chip.textContent = S.formatChoice(choice);
+          // The constant is what gets sent, so keep it reachable even when a
+          // human-readable title is on show.
+          chip.title = String(choice.value);
+          values.appendChild(chip);
+        }
+
+        row.append(name, values);
+        options.appendChild(row);
+      }
+      inner.appendChild(options);
+    }
   }
 
   const foot = document.createElement('div');
@@ -515,7 +549,7 @@ function controlFor(key, def) {
   const words = tokens(key);
   const has = (word) => words.includes(word);
 
-  if (Array.isArray(def.enum) && def.enum.length) return 'select';
+  if (S.getDisplayChoices(def).length) return 'select';
   if (def.type === 'boolean') return 'checkbox';
   if (def.type === 'number' || def.type === 'integer') return 'number';
   if (def.type === 'array' || def.type === 'object') return 'json';
@@ -531,7 +565,10 @@ function controlFor(key, def) {
 /** Prefills the form with something plausible so Execute is one click away. */
 function smartDefault(key, def, control) {
   if (def.default !== undefined) return def.default;
-  if (control === 'select') return def.enum[0];
+  if (control === 'select') {
+    const choices = S.getDisplayChoices(def);
+    return choices.length ? choices[0].value : '';
+  }
   if (control === 'checkbox') return false;
   if (control === 'number') {
     if (typeof def.minimum === 'number') return def.minimum;
@@ -638,7 +675,10 @@ function renderExecForm() {
     if (control === 'select') {
       input = document.createElement('select');
       if (!required.includes(key)) input.appendChild(new Option('', ''));
-      for (const value of def.enum) input.appendChild(new Option(String(value), String(value)));
+      // Label for the human, constant for the payload.
+      for (const choice of S.getDisplayChoices(def)) {
+        input.appendChild(new Option(S.formatChoice(choice), String(choice.value)));
+      }
     } else if (control === 'checkbox') {
       input = document.createElement('input');
       input.type = 'checkbox';
@@ -1019,29 +1059,9 @@ function createToolCard(name, args) {
   };
 }
 
-function normalizeSchema(schema) {
-  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
-    return { type: 'object', properties: {} };
-  }
-  const out = Object.assign({}, schema);
-  if (!out.type) out.type = 'object';
-  if (out.type === 'object' && !out.properties) out.properties = {};
-  return out;
-}
-
-function toOllamaTool(tool) {
-  // Properties, required, enum and anyOf reach the model exactly as the page
-  // declared them: renaming anything here is what makes a model emit
-  // `trigger_type` for a `triggerType` property.
-  return {
-    type: 'function',
-    function: {
-      name: tool.name,
-      description: tool.description || tool.name,
-      parameters: normalizeSchema(schemaOf(tool)),
-    },
-  };
-}
+// Properties, required, enum, anyOf and const reach the model exactly as the
+// page declared them; see lib/webmcp-schema.js and its regression tests.
+const toOllamaTool = S.toOllamaTool;
 
 /** Turns a tool result (MCP shape or anything else) into text. */
 function resultToText(result) {

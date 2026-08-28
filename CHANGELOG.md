@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.2
+
+Constrained parameters now show their allowed values.
+
+A property declaring `enum`, or `anyOf`/`oneOf` branches carrying `const`, was
+reduced to `triggerType:string` in the Tools panel, hiding the choices the page
+declared. Tool cards gained an **Options** row listing them, and the Execute tab
+renders those properties as a `<select>` instead of a free-text field.
+
+- `getDisplayChoices()` prefers a direct `enum`; a schema carrying both `enum`
+  and `anyOf` lists its choices once, not twice.
+- An `anyOf` entry's `title` is shown as a label next to the constant
+  (`Market need (MarketNeed)`), never in place of it. The constant is what gets
+  sent, and it stays on the element's tooltip.
+- Properties without declared choices render exactly as before.
+
+Presentation only. **No validation was added**: an argument outside the declared
+values is passed to the page untouched, and the page decides. There is a
+regression test asserting exactly that, and another asserting the schema handed
+to the model still carries `enum`, `anyOf`, `const`, `title`, `description` and
+`required` unchanged — that path was already correct and was not rewritten.
+
+`toOllamaTool()` moved into `lib/webmcp-schema.js` so the model-context path is
+covered by tests. 43 tests total.
+
 ## 0.4.1
 
 Compatibility with the current native WebMCP API. Two independent bugs made
