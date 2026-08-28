@@ -36,10 +36,15 @@
   const S = window.__WebMCPLocalAgentSchema;
 
   function rawSchemaOf(tool) {
+    if (!tool || typeof tool !== 'object') return null;
     if (tool.inputSchema !== undefined) return tool.inputSchema;
     if (tool.input_schema !== undefined) return tool.input_schema;
     if (tool.parameters !== undefined) return tool.parameters;
     if (tool.params !== undefined) return tool.params;
+    if (tool.schema !== undefined) return tool.schema;
+    if (tool.properties !== undefined && typeof tool.properties === 'object') {
+      return { type: 'object', properties: tool.properties, required: tool.required || [] };
+    }
     return null;
   }
 
@@ -62,6 +67,111 @@
       }
     } catch (_) { /* noop */ }
     return null;
+  }
+
+  function parseFormToTool(form) {
+    if (!form || !(form instanceof Element)) return null;
+    const name = form.getAttribute('toolname');
+    if (!name) return null;
+
+    const description = form.getAttribute('tooldescription') ||
+      form.getAttribute('description') ||
+      form.getAttribute('title') ||
+      '';
+
+    const properties = {};
+    const required = [];
+
+    const elements = form.querySelectorAll('input, select, textarea');
+    for (const el of elements) {
+      const fieldName = el.getAttribute('name') || el.id;
+      if (!fieldName) continue;
+
+      const fieldType = (el.getAttribute('type') || el.tagName.toLowerCase()).toLowerCase();
+      if (['submit', 'button', 'reset', 'image'].includes(fieldType)) continue;
+
+      const fieldDesc = el.getAttribute('tooldescription') ||
+        el.getAttribute('toolparamdescription') ||
+        el.getAttribute('placeholder') ||
+        el.title ||
+        '';
+
+      const isRequired = el.hasAttribute('required') || el.required;
+      if (isRequired) required.push(fieldName);
+
+      const prop = {
+        type: fieldType === 'number' || fieldType === 'range' ? 'number' :
+              fieldType === 'checkbox' ? 'boolean' : 'string',
+        description: fieldDesc,
+      };
+
+      if (el.tagName.toLowerCase() === 'select') {
+        const options = [...el.querySelectorAll('option')].map((opt) => opt.value || opt.textContent.trim()).filter(Boolean);
+        if (options.length) prop.enum = options;
+      }
+
+      properties[fieldName] = prop;
+    }
+
+    return {
+      name,
+      description,
+      inputSchema: {
+        type: 'object',
+        properties,
+        ...(required.length ? { required } : {}),
+      },
+    };
+  }
+
+  function scanDeclarativeForms() {
+    const found = [];
+    try {
+      const forms = document.querySelectorAll('form[toolname]');
+      for (const form of forms) {
+        const parsed = parseFormToTool(form);
+        if (parsed) found.push(parsed);
+      }
+    } catch (_) { /* noop */ }
+    return found;
+  }
+
+  function executeDeclarativeForm(form, params) {
+    if (!form) return { success: false, error: 'Form not found in document.' };
+    const inputs = form.querySelectorAll('input, select, textarea');
+    for (const el of inputs) {
+      const fieldName = el.getAttribute('name') || el.id;
+      if (!fieldName || !(fieldName in params)) continue;
+      const val = params[fieldName];
+
+      if (el.type === 'checkbox') {
+        el.checked = Boolean(val);
+      } else if (el.type === 'radio') {
+        if (el.value === String(val)) el.checked = true;
+      } else {
+        el.value = val === undefined || val === null ? '' : String(val);
+      }
+
+      try {
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch (_) { /* noop */ }
+    }
+
+    try {
+      if (typeof form.requestSubmit === 'function') {
+        form.requestSubmit();
+      } else if (typeof form.submit === 'function') {
+        form.submit();
+      } else {
+        const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+        if (submitBtn) submitBtn.click();
+      }
+    } catch (err) {
+      return { success: false, error: String((err && err.message) || err) };
+    }
+
+    return { success: true, message: 'Declarative form submitted.' };
   }
 
   function registrationOf(name) {
@@ -310,6 +420,11 @@
       }
     }
 
+    for (const tool of scanDeclarativeForms()) {
+      discovered++;
+      remember(tool, 'form[toolname]', { keepExisting: true });
+    }
+
     return {
       tools: [...registry.values()].map((item) => item.descriptor),
       // Reported, not swallowed: without this the panel cannot tell "this page
@@ -328,7 +443,13 @@
     // name. That object is realm-bound, so it is looked up again right now
     // rather than cached from discovery or sent across extension messaging.
     const resolved = await S.resolveRegisteredTool(contexts, name, origin, window);
-    if (resolved) return S.callExecuteTool(resolved.context, resolved.tool, params);
+    if (resolved) {
+      try {
+        return await S.callExecuteTool(resolved.context, resolved.tool, params);
+      } catch (_) {
+        // Native execution failed, try fallback callback or form submission
+      }
+    }
 
     // Imperative registration: the page handed us the callback itself.
     const entry = registry.get(name);
@@ -339,6 +460,12 @@
       if (!('arguments' in payload)) payload.arguments = params;
       if (!('name' in payload)) payload.name = name;
       return entry.execute(payload);
+    }
+
+    // Declarative form fallback in DOM
+    const form = findDeclarativeForm(name);
+    if (form) {
+      return executeDeclarativeForm(form, params);
     }
 
     // Older shapes, and only for contexts that do not implement the current
@@ -361,6 +488,9 @@
     if (value === undefined || value === null) return null;
     const type = typeof value;
     if (type === 'string' || type === 'number' || type === 'boolean') return value;
+    if (typeof Node !== 'undefined' && value instanceof Node) {
+      return value.outerHTML || value.textContent || String(value);
+    }
     try {
       return JSON.parse(JSON.stringify(value));
     } catch (_) {

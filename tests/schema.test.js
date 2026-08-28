@@ -250,3 +250,51 @@ test('humanize keeps camelCase readable without renaming the property', () => {
   assert.strictEqual(S.humanize('triggerType'), 'Trigger Type');
   assert.strictEqual(S.humanize('confirmation_id'), 'Confirmation Id');
 });
+
+// --- Enhanced parsing & execution tests -----------------------------------
+
+test('parses markdown-fenced inputSchema', () => {
+  const fenced = '```json\n{"type":"object","properties":{"query":{"type":"string"}}}\n```';
+  const schema = S.normalizeInputSchema(fenced);
+  assert.deepStrictEqual(schema, { type: 'object', properties: { query: { type: 'string' } } });
+});
+
+test('parses double-stringified inputSchema', () => {
+  const doubleStringified = JSON.stringify(JSON.stringify({ type: 'object', properties: { id: { type: 'number' } } }));
+  const schema = S.normalizeInputSchema(doubleStringified);
+  assert.deepStrictEqual(schema, { type: 'object', properties: { id: { type: 'number' } } });
+});
+
+test('callExecuteTool invokes tool.execute() directly if present on tool object', async () => {
+  let executedWith;
+  const tool = {
+    name: 'directTool',
+    execute: async (args) => {
+      executedWith = args;
+      return { success: true };
+    },
+  };
+  const result = await S.callExecuteTool(null, tool, { foo: 'bar' });
+  assert.deepStrictEqual(result, { success: true });
+  assert.deepStrictEqual(executedWith, { foo: 'bar' });
+});
+
+test('callExecuteTool falls back to context.executeTool(tool.name, args) if tool object is rejected', async () => {
+  let calledName;
+  let calledArgs;
+  const context = {
+    executeTool: async (target, args) => {
+      if (typeof target !== 'string') {
+        throw new TypeError("Failed to execute 'executeTool': The provided value is not of type 'RegisteredTool'.");
+      }
+      calledName = target;
+      calledArgs = args;
+      return 'fallback_ok';
+    },
+  };
+  const tool = { name: 'myTool' };
+  const result = await S.callExecuteTool(context, tool, { a: 1 });
+  assert.strictEqual(result, 'fallback_ok');
+  assert.strictEqual(calledName, 'myTool');
+  assert.deepStrictEqual(calledArgs, { a: 1 });
+});

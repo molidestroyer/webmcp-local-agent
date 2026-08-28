@@ -1147,13 +1147,29 @@ async function ollamaChat(messages, tools, onDelta) {
 }
 
 function parseArguments(raw) {
-  if (raw && typeof raw === 'object') return raw;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw;
   if (typeof raw === 'string') {
+    let trimmed = raw.trim();
+    if (trimmed.startsWith('```')) {
+      trimmed = trimmed.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    }
     try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed : {};
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed === 'string') {
+        try {
+          const second = JSON.parse(parsed.trim());
+          if (second && typeof second === 'object' && !Array.isArray(second)) return second;
+        } catch (_) { /* ignore */ }
+      }
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     } catch (_) {
-      return {};
+      try {
+        const fixed = trimmed.replace(/'/g, '"');
+        const parsed = JSON.parse(fixed);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch (_) {
+        return {};
+      }
     }
   }
   return {};
