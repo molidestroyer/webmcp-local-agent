@@ -233,3 +233,32 @@ test('getDisplayChoices reports choices without judging a value against them', (
   assert.ok(Array.isArray(choices));
   assert.strictEqual(typeof choices.isValid, 'undefined');
 });
+
+// --- Registration labelling ------------------------------------------------
+
+test('each registration method gets its own label', () => {
+  assert.strictEqual(S.registrationLabel('javascript'), '⚙️ JavaScript API');
+  assert.strictEqual(S.registrationLabel('declarative'), '📝 HTML form');
+  assert.strictEqual(S.registrationLabel('unknown'), '❔ Unknown');
+});
+
+test('an unrecognised or missing registration never claims JavaScript', () => {
+  for (const value of [undefined, null, '', 'form', 'whatever']) {
+    assert.strictEqual(
+      S.registrationLabel(value),
+      '❔ Unknown',
+      'guessing "JavaScript API" is the bug this replaced'
+    );
+  }
+});
+
+test('the tooltip explains what the label is based on', () => {
+  assert.match(S.registrationTitle('javascript', 'document.modelContext'), /provideContext/);
+  assert.match(S.registrationTitle('declarative', 'document.modelContext'), /<form toolname/);
+  assert.match(S.registrationTitle('unknown', null), /Could not tell/);
+  assert.match(
+    S.registrationTitle('declarative', 'document.modelContext'),
+    /document\.modelContext/,
+    'the context object stays visible on hover'
+  );
+});

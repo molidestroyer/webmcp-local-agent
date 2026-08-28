@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebMCP demo · declarative form</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    max-width: 680px; margin: 40px auto; padding: 0 20px;
+    background: #0f0f17; color: #e8e8f2;
+  }
+  h1 { font-size: 20px; }
+  code { font-family: ui-monospace, Consolas, monospace; background: #1c1c2e; padding: 1px 5px; border-radius: 4px; }
+  .card { border: 1px solid #262637; border-radius: 10px; padding: 14px 18px; margin-top: 18px; background: #171726; }
+  .muted { color: #8f8fa8; font-size: 13px; }
+  label { display: block; margin-top: 10px; font-size: 13px; color: #8f8fa8; }
+  input, select, textarea, button {
+    width: 100%; padding: 6px 8px; margin-top: 3px;
+    background: #0f0f17; color: #e8e8f2; border: 1px solid #262637; border-radius: 6px;
+    font: inherit; font-size: 13px;
+  }
+  button { margin-top: 14px; background: #8b5cf6; border-color: #8b5cf6; color: #fff; cursor: pointer; }
+  li { font-size: 14px; }
+</style>
+</head>
+<body>
+  <h1>WebMCP demo · declarative form</h1>
+  <p class="muted">
+    No registration code at all: the tool is declared entirely in the markup with
+    <code>toolname</code>, <code>tooldescription</code> and
+    <code>toolparamdescription</code>, and the schema is synthesized from the form
+    controls.
+  </p>
+  <p class="muted">
+    Use it to check that the Tools panel reports <strong>📝 HTML form</strong> rather
+    than "JavaScript API". Nothing here ever calls <code>registerTool()</code>.
+  </p>
+
+  <div class="card">
+    <!-- The whole tool definition lives in these attributes. -->
+    <form id="feature-form"
+          toolname="createFeature"
+          tooldescription="Creates a new feature in the backlog from a title, a description, the trigger that motivated it and its priority.">
+      <label>Title
+        <input type="text" name="title" required
+               toolparamdescription="A short, descriptive title for the feature.">
+      </label>
+      <label>Description
+        <textarea name="description" rows="2" required
+                  toolparamdescription="A detailed explanation of the feature requirements and scope."></textarea>
+      </label>
+      <label>Trigger type
+        <select name="triggerType" required
+                toolparamdescription="What initiated the feature.">
+          <option value="MarketNeed">Market need</option>
+          <option value="ChangeRequest">Change request</option>
+          <option value="Defect">Defect</option>
+          <option value="AutomatedSource">Automated source</option>
+        </select>
+      </label>
+      <label>Priority
+        <select name="priority" required toolparamdescription="Feature priority.">
+          <option value="P1">P1</option>
+          <option value="P2">P2</option>
+          <option value="P3">P3</option>
+        </select>
+      </label>
+      <button type="submit">Create feature</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <strong>Created features</strong>
+    <ul id="list"></ul>
+    <p class="muted" id="counter">none yet</p>
+  </div>
+
+<script>
+// --- Page state ------------------------------------------------------------
+const features = [];
+let nextId = 1;
+
+function render() {
+  const list = document.getElementById('list');
+  list.textContent = '';
+  for (const feature of features) {
+    const li = document.createElement('li');
+    li.textContent = '#' + feature.id + ' [' + feature.triggerType + '/' + feature.priority + '] ' + feature.title;
+    list.appendChild(li);
+  }
+  document.getElementById('counter').textContent = features.length
+    ? features.length + ' feature(s)'
+    : 'none yet';
+}
+render();
+
+const form = document.getElementById('feature-form');
+
+function applyAndRespond(args) {
+  for (const [key, value] of Object.entries(args || {})) {
+    const field = form.elements[key];
+    if (field) field.value = value;
+  }
+  const data = Object.fromEntries(new FormData(form).entries());
+  const feature = { id: nextId++, ...data };
+  features.push(feature);
+  render();
+  return JSON.stringify({ ok: true, id: feature.id, title: feature.title });
+}
+
+form.addEventListener('submit', (event) => {
+  event.preventDefault();
+  // The real declarative API delivers the agent's response through
+  // SubmitEvent.respondWith(); a manual click just runs the same code.
+  const result = applyAndRespond(null);
+  if (typeof event.respondWith === 'function') event.respondWith(Promise.resolve(result));
+});
+
+// --- Declarative polyfill --------------------------------------------------
+// Synthesizes the schema from the form the way a browser with native WebMCP
+// would. It deliberately never calls registerTool(): the tools appear only
+// through getTools(), which is what makes this a genuine test of how the
+// extension tells declarative registration apart.
+if (!('modelContext' in document)) {
+  function schemaFromForm(element) {
+    const properties = {};
+    const required = [];
+    for (const field of element.elements) {
+      if (!field.name || field.type === 'submit' || field.type === 'button') continue;
+      const property = { type: 'string' };
+      const description = field.getAttribute('toolparamdescription');
+      if (description) property.description = description;
+      if (field.tagName === 'SELECT') {
+        property.enum = [...field.options].map((option) => option.value);
+        property.anyOf = [...field.options].map((option) => ({
+          type: 'string', const: option.value, title: option.textContent.trim(),
+        }));
+      }
+      properties[field.name] = property;
+      if (field.required) required.push(field.name);
+    }
+    return { type: 'object', properties, required };
+  }
+
+  function synthesize() {
+    return [...document.querySelectorAll('form[toolname]')].map((element) => ({
+      name: element.getAttribute('toolname'),
+      description: element.getAttribute('tooldescription') || '',
+      origin: location.origin,
+      // Serialized, like the native API hands it over.
+      inputSchema: JSON.stringify(schemaFromForm(element)),
+      __form: element,
+    }));
+  }
+
+  document.modelContext = {
+    async getTools() { return synthesize(); },
+    async executeTool(registeredTool, args) {
+      if (!registeredTool || typeof registeredTool !== 'object' || !registeredTool.__form) {
+        throw new TypeError(
+          "Failed to execute 'executeTool' on 'ModelContext': "
+          + "The provided value is not of type 'RegisteredTool'."
+        );
+      }
+      return applyAndRespond(args || {});
+    },
+  };
+}
+</script>
+</body>
+</html>

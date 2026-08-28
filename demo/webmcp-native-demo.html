@@ -121,6 +121,11 @@ if (!('modelContext' in document)) {
 }
 
 // --- The reproduction tool -------------------------------------------------
+// Registered on DOMContentLoaded rather than inline: an inspector hooking the
+// API at document_start patches document.modelContext on that same event, and
+// it listens first, so its wrapper sees this call. In a browser with native
+// WebMCP the object exists from the start and the timing is a non-issue.
+document.addEventListener('DOMContentLoaded', () => {
 document.modelContext.registerTool({
   name: 'createFeature',
   description: 'Creates a new feature in the backlog from a title, a description, '
@@ -172,6 +177,7 @@ document.modelContext.registerTool({
     // A JSON string result, like SubmitEvent.respondWith() often returns.
     return JSON.stringify({ ok: true, id: feature.id, title: feature.title });
   },
+});
 });
 </script>
 </body>

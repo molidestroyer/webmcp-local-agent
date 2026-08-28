@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.3
+
+Tool cards no longer claim every tool was registered from JavaScript.
+
+The "Registered via" badge was the hardcoded string `JavaScript API`, so a tool
+declared in the markup with `<form toolname="...">` was reported as a script
+registration. `RegisteredTool` carries nothing that distinguishes the two — the
+IDL is identical — so the page hook now infers it:
+
+- **`javascript`** — the name went through the wrapped `provideContext()` /
+  `registerTool()`.
+- **`declarative`** — a matching `<form toolname="...">` is in the document.
+- **`unknown`** — neither. Shown as such rather than guessed, which is what the
+  hardcoded label was doing.
+
+`unknown` is the honest answer when the hook was injected into an already-loaded
+tab: it cannot have witnessed a registration that happened before it existed.
+The descriptor carries `installedEarly` so that case stays distinguishable.
+
+`demo/webmcp-form-demo.html` declares the same `createFeature` tool entirely in
+markup and never calls `registerTool()`, so the detection is testable end to
+end. The native demo now registers on `DOMContentLoaded`, which is when a hook
+installed at `document_start` has patched the API — in a browser with native
+WebMCP the object exists from the start and the timing does not arise.
+
 ## 0.4.2
 
 Constrained parameters now show their allowed values.

@@ -488,10 +488,10 @@ function createToolListItem(tool) {
   const via = document.createElement('span');
   via.textContent = 'Registered via';
   const source = document.createElement('span');
-  source.className = 'pill';
-  source.textContent = '⚙️ JavaScript API';
-  // The raw object it came from is more precise than the friendly label.
-  if (tool.source) source.title = tool.source;
+  const registration = tool.registration || 'unknown';
+  source.className = 'pill' + (registration === 'unknown' ? ' pill--muted' : '');
+  source.textContent = S.registrationLabel(registration);
+  source.title = S.registrationTitle(registration, tool.source);
   const run = document.createElement('button');
   run.type = 'button';
   run.className = 'tool-card__run';

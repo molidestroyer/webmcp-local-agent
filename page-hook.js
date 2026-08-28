@@ -23,6 +23,13 @@
 
   /** @type {Map<string, {descriptor: object, execute: Function|null, source: string}>} */
   const registry = new Map();
+
+  // Whether we were in place before the page could register anything. If we
+  // arrived late (rescue injection into an already-loaded tab) then "the
+  // wrapper never saw it" proves nothing, and registration stays unknown.
+  const installedEarly = document.readyState === 'loading';
+  /** Tool names seen going through the wrapped script API. */
+  const registeredByScript = new Set();
   const patchedObjects = new WeakSet();
 
   const isFn = (value) => typeof value === 'function';
@@ -43,9 +50,32 @@
     return null;
   }
 
+  /**
+   * A declaratively registered tool is a <form toolname="..."> in the document.
+   * RegisteredTool exposes nothing about its own registration, so the markup is
+   * the only evidence available.
+   */
+  function findDeclarativeForm(name) {
+    try {
+      for (const form of document.querySelectorAll('form[toolname]')) {
+        if (form.getAttribute('toolname') === name) return form;
+      }
+    } catch (_) { /* noop */ }
+    return null;
+  }
+
+  function registrationOf(name) {
+    if (registeredByScript.has(name)) return 'javascript';
+    if (findDeclarativeForm(name)) return 'declarative';
+    // Never claim "JavaScript API" just because nothing else matched: that is
+    // exactly the guess that mislabelled declarative forms before.
+    return 'unknown';
+  }
+
   function remember(tool, source, options) {
     const keepExisting = Boolean(options && options.keepExisting);
     if (!tool || typeof tool !== 'object' || typeof tool.name !== 'string') return;
+    if (options && options.viaScript) registeredByScript.add(tool.name);
     if (keepExisting && registry.has(tool.name)) return;
 
     // The native API serialises inputSchema to a JSON string; imperative
@@ -62,6 +92,8 @@
         schemaError: normalized.error,
         annotations: tool.annotations || null,
         origin: typeof tool.origin === 'string' ? tool.origin : null,
+        registration: registrationOf(tool.name),
+        installedEarly,
         source,
       },
       execute: executorOf(tool),
@@ -91,7 +123,7 @@
             // provideContext() replaces the whole tool set.
             registry.clear();
             const tools = config && config.tools;
-            if (Array.isArray(tools)) tools.forEach((tool) => remember(tool, label));
+            if (Array.isArray(tools)) tools.forEach((tool) => remember(tool, label, { viaScript: true }));
             notifyToolsChanged();
           } catch (_) { /* never break the page */ }
           return original(config, ...rest);
@@ -110,9 +142,9 @@
               const name = args[0];
               const config = args[1] || {};
               const handler = args[2];
-              remember(Object.assign({}, config, { name, execute: handler }), label);
+              remember(Object.assign({}, config, { name, execute: handler }), label, { viaScript: true });
             } else {
-              remember(args[0], label);
+              remember(args[0], label, { viaScript: true });
             }
             notifyToolsChanged();
           } catch (_) { /* noop */ }

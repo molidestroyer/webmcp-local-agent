@@ -106,13 +106,14 @@ does not), then creates the GitHub release with the zip attached.
 
 You need a page that exposes WebMCP tools.
 
-**Playground: <https://molidestroyer.github.io/webmcp-local-agent/>** — two demo pages, no
+**Playground: <https://molidestroyer.github.io/webmcp-local-agent/>** — three demo pages, no
 setup. Served over HTTPS from a real origin, so unlike a local `file://` page they also
 exercise the origin matching the extension does when resolving a tool.
 
 - **Native API demo** — `document.modelContext`, `getTools()` returning `RegisteredTool`
   objects whose `inputSchema` is a JSON string, `executeTool(registeredTool, args)`. Its
   `createFeature` tool has four required inputs, two constrained by `enum` / `anyOf`.
+- **Declarative form demo** — the same tool declared entirely in markup with `<form toolname="...">`; no registration code runs, and the Tools panel reports it as an HTML form.
 - **Imperative demo** — `navigator.modelContext.provideContext({ tools })`, a todo list.
 
 The same files ship inside the extension (`demo/`), so you can open them offline too.

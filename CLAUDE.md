@@ -35,7 +35,7 @@ Repo language is **English** — code, comments, UI strings, docs and commit mes
 | `content.js` | ISOLATED | Bridge. Opens `chrome.runtime.connect({name:'webmcp-bridge'})` **towards** the SW. |
 | `background.js` | SW | `tabId → Port` map, request/response routing with timeouts, `sidePanel.setPanelBehavior`, rescue injection via `scripting.executeScript`. |
 | `sidepanel.{html,css,js}` | panel | Four tabs (`#tab-chat`, `#tab-tools`, `#tab-execute`, `#tab-history`) over one shared `state`, plus the tool-calling loop against `/api/chat`. Fixed dark theme, no light mode. |
-| `demo/` | — | Playground: `index.html` landing page, `webmcp-demo.html` (imperative, 4 tools) and `webmcp-native-demo.html` (native API shape, the `createFeature` reproduction). Published to GitHub Pages **and** shipped inside the zip from this one folder, so the two can never drift. |
+| `demo/` | — | Playground: `index.html` landing, `webmcp-demo.html` (imperative), `webmcp-native-demo.html` (native API shape) and `webmcp-form-demo.html` (declarative `<form toolname>`, no registration code at all). Published to GitHub Pages **and** shipped inside the zip from this one folder, so the two can never drift. |
 | `.github/workflows/pages.yml` | — | Deploys `demo/` to <https://molidestroyer.github.io/webmcp-local-agent/> on pushes that touch it. Needs Settings → Pages → Source = **GitHub Actions** (one-time, done by hand). |
 | `build.ps1` | — | Validates + packages into `dist/webmcp-local-agent-<version>.zip`. |
 | `.github/workflows/build.yml` | — | CI: runs `build.ps1` (pwsh is preinstalled on `ubuntu-latest`), uploads the artifact and publishes a release on `v*` tags. |
@@ -104,6 +104,21 @@ loudly with its own error shown in the panel.
 
 `demo/webmcp-native-demo.html` reproduces all three locally (the `createFeature` case), and
 its fake `executeTool` throws the real TypeError when handed a name.
+
+## Registration method (Tools card badge)
+
+`RegisteredTool` says nothing about how it was registered — the IDL is identical for
+declarative and imperative — so `page-hook.js` infers it and the panel must never
+hardcode a value (it did, and reported every declarative form as "JavaScript API"):
+
+- `javascript` — the name passed through the wrapped `provideContext()`/`registerTool()`.
+- `declarative` — `document.querySelector('form[toolname="<name>"]')` matches. The
+  declarative API uses `toolname`, `tooldescription` and `toolparamdescription`.
+- `unknown` — neither. **Say unknown; never fall back to "JavaScript API".**
+
+`unknown` is expected when the hook was rescue-injected into an already-loaded tab: it
+could not have seen a registration that predates it. `descriptor.installedEarly` records
+whether we were in place at `document_start`, so that case remains distinguishable.
 
 ## Gotchas
 

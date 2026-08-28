@@ -749,3 +749,9 @@ body {
 }
 
 .pill--choice { background: var(--card-2); color: var(--text); }
+
+.pill--muted {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-faint);
+}
