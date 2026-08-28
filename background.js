@@ -6,6 +6,9 @@
  */
 
 const BRIDGE_TIMEOUT_MS = 35000;
+const BADGE_COLOR = '#10B981';
+// The page registers its tools a moment after the bridge connects.
+const BADGE_SETTLE_MS = 800;
 
 /** @type {Map<number, chrome.runtime.Port>} */
 const ports = new Map();
@@ -21,12 +24,36 @@ function enableSidePanelOnActionClick() {
 enableSidePanelOnActionClick();
 chrome.runtime.onInstalled.addListener(enableSidePanelOnActionClick);
 
+// --- Toolbar badge ---------------------------------------------------------
+
+/** Per-tab badge, so switching tabs shows the right count with no extra work. */
+function setBadge(tabId, count) {
+  chrome.action.setBadgeText({ tabId, text: count > 0 ? String(count) : '' }).catch(() => {});
+  if (count > 0) {
+    chrome.action.setBadgeBackgroundColor({ tabId, color: BADGE_COLOR }).catch(() => {});
+  }
+}
+
+/** Asks the page for its tools just to refresh the badge. */
+async function refreshBadge(tabId) {
+  if (!ports.has(tabId)) return;
+  const answer = await bridge(tabId, 'list', null);
+  if (answer && Array.isArray(answer.result)) setBadge(tabId, answer.result.length);
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  // A navigation invalidates whatever we knew about that tab.
+  if (changeInfo.status === 'loading') setBadge(tabId, 0);
+});
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'webmcp-bridge') return;
   const tabId = port.sender && port.sender.tab && port.sender.tab.id;
   if (typeof tabId !== 'number') return;
 
   ports.set(tabId, port);
+  // Badge the icon without waiting for the side panel to be opened.
+  setTimeout(() => refreshBadge(tabId), BADGE_SETTLE_MS);
 
   port.onMessage.addListener((message) => {
     if (!message) return;
@@ -37,6 +64,7 @@ chrome.runtime.onConnect.addListener((port) => {
         resolver(message);
       }
     } else if (message.type === 'event' && message.event === 'tools-changed') {
+      refreshBadge(tabId);
       chrome.runtime.sendMessage({ type: 'tools-changed', tabId }).catch(() => {});
     }
   });
@@ -114,6 +142,12 @@ async function bridge(tabId, action, payload) {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.type !== 'bridge') return undefined;
-  bridge(message.tabId, message.action, message.payload).then(sendResponse);
+  bridge(message.tabId, message.action, message.payload).then((answer) => {
+    // Every listing the panel asks for also keeps the badge honest.
+    if (message.action === 'list' && Array.isArray(answer.result)) {
+      setBadge(message.tabId, answer.result.length);
+    }
+    sendResponse(answer);
+  });
   return true; // async response
 });

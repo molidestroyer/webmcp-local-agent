@@ -1,13 +1,18 @@
 /**
  * WebMCP Local Agent - sidepanel.js
  *
- * Agent logic: discovers Ollama models, discovers the WebMCP tools exposed by
- * the active tab and runs the tool-calling loop against /api/chat.
+ * Four tabs over one shared state:
+ *   Chat     - Ollama conversation with automatic tool calling
+ *   Tools    - rich cards for the tools the active tab exposes
+ *   Execute  - manual runs with a schema-driven form and a live JSON editor
+ *   History  - every execution, manual or model-driven
  */
 'use strict';
 
 const OLLAMA_HOSTS = ['http://127.0.0.1:11434', 'http://localhost:11434'];
 const MAX_TOOL_STEPS = 6;
+const HISTORY_LIMIT = 100;
+const TABS = ['chat', 'tools', 'execute', 'history'];
 
 // Ollama answers 403 to any origin missing from OLLAMA_ORIGINS, and
 // chrome-extension:// is not allowed by default. Chrome does not attach an
@@ -33,52 +38,73 @@ function describeHttpError(status, detail) {
 }
 
 const els = {
-  modelSelect: document.getElementById('model-select'),
-  refreshModels: document.getElementById('refresh-models'),
+  // header
   toolsBadge: document.getElementById('tools-badge'),
   toolsBadgeText: document.getElementById('tools-badge-text'),
   refreshTools: document.getElementById('refresh-tools'),
-  clearChat: document.getElementById('clear-chat'),
-  toolsList: document.getElementById('tools-list'),
+  modelSelect: document.getElementById('model-select'),
+  refreshModels: document.getElementById('refresh-models'),
   status: document.getElementById('status'),
+  // chat
   chat: document.getElementById('chat'),
+  composer: document.getElementById('composer'),
   input: document.getElementById('input'),
   send: document.getElementById('send'),
+  clearChat: document.getElementById('clear-chat'),
   confirmTools: document.getElementById('confirm-tools'),
+  // tools
+  toolsList: document.getElementById('tools-list'),
+  toolsEmpty: document.getElementById('tools-empty'),
+  // execute
+  execPicker: document.getElementById('exec-picker'),
+  execBody: document.getElementById('exec-body'),
+  execIcon: document.getElementById('exec-icon'),
+  execName: document.getElementById('exec-name'),
+  execDesc: document.getElementById('exec-desc'),
+  execForm: document.getElementById('exec-form'),
+  execJson: document.getElementById('exec-json'),
+  execJsonState: document.getElementById('exec-json-state'),
+  execRun: document.getElementById('exec-run'),
+  execResult: document.getElementById('exec-result'),
+  execStatus: document.getElementById('exec-status'),
+  execOutput: document.getElementById('exec-output'),
+  execEmpty: document.getElementById('exec-empty'),
+  // history
+  historyList: document.getElementById('history-list'),
+  historyCount: document.getElementById('history-count'),
+  historyClear: document.getElementById('history-clear'),
+  historyEmpty: document.getElementById('history-empty'),
 };
 
 const state = {
+  tab: 'chat',
   host: OLLAMA_HOSTS[0],
   models: [],
   model: '',
   tools: [],
-  // Tool names whose card is expanded, so re-renders do not collapse them.
   openTools: new Set(),
+  selectedTool: '',
   messages: [{ role: 'system', content: SYSTEM_PROMPT }],
+  history: [],
   tabId: null,
   busy: false,
   ollamaOk: false,
 };
 
-// --- Helpers ---------------------------------------------------------------
+// --- Generic helpers -------------------------------------------------------
 
-function scrollToBottom() {
-  els.chat.scrollTop = els.chat.scrollHeight;
-}
-
-function clearEmptyState() {
-  const empty = els.chat.querySelector('.empty');
-  if (empty) empty.remove();
+function pretty(value) {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (_) {
+    return String(value);
+  }
 }
 
 function showStatus(text) {
-  if (!text) {
-    els.status.hidden = true;
-    els.status.textContent = '';
-    return;
-  }
-  els.status.hidden = false;
-  els.status.textContent = text;
+  els.status.hidden = !text;
+  els.status.textContent = text || '';
 }
 
 function updateSendState() {
@@ -98,8 +124,7 @@ function renderMarkdown(container, text) {
       container.appendChild(pre);
       return;
     }
-    const chunks = part.split(/(`[^`\n]+`)/);
-    chunks.forEach((chunk) => {
+    part.split(/(`[^`\n]+`)/).forEach((chunk) => {
       if (!chunk) return;
       if (chunk.startsWith('`') && chunk.endsWith('`') && chunk.length > 2) {
         const code = document.createElement('code');
@@ -112,16 +137,715 @@ function renderMarkdown(container, text) {
   });
 }
 
-function pretty(value) {
-  if (typeof value === 'string') return value;
+/** `checkInDate` / `check_in_date` -> ['check','in','date'] */
+function tokens(key) {
+  return String(key)
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function humanize(key) {
+  return tokens(key).map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+}
+
+// --- Tabs ------------------------------------------------------------------
+
+function setTab(name) {
+  if (!TABS.includes(name)) name = 'chat';
+  state.tab = name;
+  for (const button of document.querySelectorAll('.tab')) {
+    button.classList.toggle('is-active', button.dataset.tab === name);
+  }
+  for (const tab of TABS) {
+    document.getElementById('tab-' + tab).classList.toggle('is-active', tab === name);
+  }
+  // The composer belongs to the chat only; keeping it visible elsewhere would
+  // suggest the other tabs accept messages.
+  els.composer.hidden = name !== 'chat';
+  chrome.storage.local.set({ activeTab: name });
+  if (name === 'chat') els.input.focus();
+}
+
+// --- Ollama models ---------------------------------------------------------
+
+async function fetchLocalModels() {
+  els.refreshModels.classList.add('is-spinning');
+  els.refreshModels.disabled = true;
+
+  let lastError = null;
   try {
-    return JSON.stringify(value, null, 2);
-  } catch (_) {
-    return String(value);
+    for (const host of OLLAMA_HOSTS) {
+      try {
+        const response = await fetch(host + '/api/tags', { cache: 'no-store' });
+        if (response.status === 403) {
+          // Ollama is alive but rejects our origin: stop trying other hosts, a
+          // "not detected" message would be misleading.
+          state.host = host;
+          state.ollamaOk = false;
+          state.models = [];
+          state.model = '';
+          renderModelOptions('Ollama rejects the extension');
+          showStatus(CORS_HINT);
+          return;
+        }
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const data = await response.json();
+        const models = (data.models || [])
+          .map((entry) => ({
+            name: entry.name || entry.model,
+            size: entry.size || 0,
+            capabilities: entry.capabilities || [],
+          }))
+          .filter((entry) => entry.name)
+          .sort((a, b) => a.name.localeCompare(b.name));
+
+        state.host = host;
+        state.models = models;
+        state.ollamaOk = models.length > 0;
+
+        if (!models.length) {
+          renderModelOptions('No models pulled');
+          showStatus('Ollama is running but has no models. Pull one with: ollama pull qwen3:8b');
+          return;
+        }
+
+        const stored = await chrome.storage.local.get('selectedModel');
+        const preferred = models.some((m) => m.name === stored.selectedModel)
+          ? stored.selectedModel
+          : models[0].name;
+
+        renderModelOptions();
+        els.modelSelect.value = preferred;
+        state.model = preferred;
+        showStatus('');
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    state.ollamaOk = false;
+    state.models = [];
+    state.model = '';
+    renderModelOptions('Ollama not detected');
+    showStatus(
+      'Ollama not detected on 127.0.0.1:11434. Start it with "ollama serve" and hit 🔄. '
+      + (lastError ? '(' + lastError.message + ')' : '')
+    );
+  } finally {
+    els.refreshModels.classList.remove('is-spinning');
+    els.refreshModels.disabled = false;
+    updateSendState();
   }
 }
 
-// --- Message rendering -----------------------------------------------------
+function renderModelOptions(placeholder) {
+  els.modelSelect.textContent = '';
+  if (placeholder) {
+    els.modelSelect.appendChild(new Option(placeholder, ''));
+    els.modelSelect.disabled = true;
+    return;
+  }
+  els.modelSelect.disabled = false;
+  for (const model of state.models) {
+    const gb = model.size ? ' · ' + (model.size / 1e9).toFixed(1) + ' GB' : '';
+    const tools = model.capabilities.includes('tools') ? ' · tools' : '';
+    els.modelSelect.appendChild(new Option(model.name + gb + tools, model.name));
+  }
+}
+
+// --- Bridge to the page ----------------------------------------------------
+
+async function currentTabId() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  state.tabId = tab ? tab.id : null;
+  return state.tabId;
+}
+
+async function bridge(action, payload) {
+  try {
+    const answer = await chrome.runtime.sendMessage({
+      type: 'bridge',
+      tabId: state.tabId,
+      action,
+      payload,
+    });
+    return answer || { result: null, error: 'The service worker did not respond.' };
+  } catch (err) {
+    return { result: null, error: String((err && err.message) || err) };
+  }
+}
+
+async function detectPageTools() {
+  els.refreshTools.classList.add('is-spinning');
+  try {
+    await currentTabId();
+    const answer = state.tabId == null ? null : await bridge('list', null);
+    state.tools = answer && !answer.error && Array.isArray(answer.result) ? answer.result : [];
+
+    renderToolsBadge(state.tabId == null ? 'no tab' : null);
+    renderToolsList();
+    renderPicker();
+  } finally {
+    els.refreshTools.classList.remove('is-spinning');
+  }
+}
+
+function renderToolsBadge(text) {
+  const count = state.tools.length;
+  els.toolsBadgeText.textContent = text || (count === 1 ? '1 tool' : count + ' tools');
+  els.toolsBadge.classList.toggle('has-tools', count > 0);
+}
+
+// --- Schema reading --------------------------------------------------------
+
+function schemaOf(tool) {
+  const schema = tool.inputSchema || tool.parameters;
+  return schema && typeof schema === 'object' && !Array.isArray(schema) ? schema : {};
+}
+
+function propertyNames(schema) {
+  const props = schema.properties;
+  return props && typeof props === 'object' ? Object.keys(props) : [];
+}
+
+function requiredNames(schema) {
+  return Array.isArray(schema.required) ? schema.required : [];
+}
+
+function propertyDef(schema, key) {
+  return (schema.properties && schema.properties[key]) || {};
+}
+
+function describeNeeds(props, required) {
+  if (!props.length) return 'No input needed.';
+  const primary = (required.length ? required : props).map(humanize);
+  if (props.length === 1) return 'Needs: ' + primary[0] + '.';
+  // "and more" tracks the total, not just the sample: a tool with 2 required and
+  // 2 optional params still asks for 4 things.
+  const shown = primary.slice(0, 2);
+  const more = props.length > shown.length;
+  const sample = more ? shown.join(', ') + ' and more' : shown.join(' and ');
+  return 'Needs ' + props.length + ' details (like ' + sample + ').';
+}
+
+const TOOL_ICONS = [
+  [/(book|reserve|schedul|appointment|slot|calendar|date)/, '📅'],
+  [/(cart|buy|order|checkout|purchas|pay)/, '🛒'],
+  [/(search|find|query|lookup)/, '🔍'],
+  [/(add|create|new|insert|append)/, '➕'],
+  [/(delete|remove|clear|cancel)/, '🗑'],
+  [/(list|todos|items|all|get|read|fetch|info)/, '📋'],
+  [/(update|edit|set|change|toggle)/, '✏️'],
+  [/(theme|color|style|dark|light)/, '🎨'],
+  [/(send|mail|message|notify|email)/, '✉️'],
+  [/(user|account|profile|login|auth)/, '👤'],
+  [/(nav|open|go|route|scroll|click)/, '🧭'],
+];
+
+function iconForTool(tool) {
+  const haystack = (tool.name + ' ' + (tool.description || '')).toLowerCase();
+  for (const [pattern, icon] of TOOL_ICONS) {
+    if (pattern.test(haystack)) return icon;
+  }
+  return '⚡';
+}
+
+// --- Tools tab -------------------------------------------------------------
+
+function makeSection(labelText) {
+  const section = document.createElement('div');
+  section.className = 'tool-card__section';
+  const label = document.createElement('div');
+  label.className = 'field-label';
+  label.textContent = labelText;
+  section.appendChild(label);
+  return section;
+}
+
+function createToolListItem(tool) {
+  const schema = schemaOf(tool);
+  const props = propertyNames(schema);
+  const required = requiredNames(schema);
+
+  const card = document.createElement('div');
+  card.className = 'tool-card';
+  if (state.openTools.has(tool.name)) card.classList.add('is-open');
+
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'tool-card__head';
+  head.setAttribute('aria-expanded', String(card.classList.contains('is-open')));
+
+  const icon = document.createElement('span');
+  icon.className = 'tool-card__icon';
+  icon.textContent = iconForTool(tool);
+
+  const titles = document.createElement('div');
+  titles.className = 'tool-card__titles';
+  const title = document.createElement('div');
+  title.className = 'tool-card__name';
+  title.textContent = humanize(tool.name);
+  const id = document.createElement('div');
+  id.className = 'tool-card__id';
+  id.textContent = tool.name;
+  const teaser = document.createElement('div');
+  teaser.className = 'tool-card__teaser';
+  teaser.textContent = tool.description || 'No description provided.';
+  titles.append(title, id, teaser);
+
+  const chevron = document.createElement('span');
+  chevron.className = 'tool-card__chevron';
+  chevron.textContent = '▼';
+  head.append(icon, titles, chevron);
+
+  const details = document.createElement('div');
+  details.className = 'tool-card__details';
+  const inner = document.createElement('div');
+  details.appendChild(inner);
+
+  const does = makeSection('What it does');
+  const doesText = document.createElement('div');
+  doesText.className = 'tool-card__text';
+  doesText.textContent = tool.description || 'The page did not provide a description.';
+  does.appendChild(doesText);
+
+  const needs = makeSection('What it needs');
+  const needsText = document.createElement('div');
+  needsText.className = 'tool-card__text';
+  needsText.textContent = describeNeeds(props, required);
+  needs.appendChild(needsText);
+
+  inner.append(does, needs);
+
+  if (props.length) {
+    const params = makeSection('Parameters');
+    const pills = document.createElement('div');
+    pills.className = 'pills';
+    for (const key of props) {
+      const def = propertyDef(schema, key);
+      const pill = document.createElement('span');
+      pill.className = 'pill' + (required.includes(key) ? ' pill--required' : '');
+      pill.textContent = key + (def.type ? ':' + def.type : '');
+      if (def.description) pill.title = def.description;
+      pills.appendChild(pill);
+    }
+    params.appendChild(pills);
+    inner.appendChild(params);
+  }
+
+  const foot = document.createElement('div');
+  foot.className = 'tool-card__foot';
+  const via = document.createElement('span');
+  via.textContent = 'Registered via';
+  const source = document.createElement('span');
+  source.className = 'pill';
+  source.textContent = '⚙️ JavaScript API';
+  // The raw object it came from is more precise than the friendly label.
+  if (tool.source) source.title = tool.source;
+  const run = document.createElement('button');
+  run.type = 'button';
+  run.className = 'tool-card__run';
+  run.textContent = 'Run ▶';
+  foot.append(via, source, run);
+
+  card.append(head, details, foot);
+
+  head.addEventListener('click', () => {
+    const open = card.classList.toggle('is-open');
+    head.setAttribute('aria-expanded', String(open));
+    if (open) state.openTools.add(tool.name);
+    else state.openTools.delete(tool.name);
+  });
+
+  // One execution UI only: Run hands over to the Execute tab.
+  run.addEventListener('click', () => {
+    selectTool(tool.name);
+    setTab('execute');
+  });
+
+  return card;
+}
+
+function renderToolsList() {
+  els.toolsList.textContent = '';
+  els.toolsEmpty.hidden = state.tools.length > 0;
+  for (const tool of state.tools) {
+    els.toolsList.appendChild(createToolListItem(tool));
+  }
+}
+
+// --- Execute tab -----------------------------------------------------------
+
+function pad(value) {
+  return String(value).padStart(2, '0');
+}
+
+function todayISO() {
+  const now = new Date();
+  return now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+}
+
+function nowHHMM() {
+  const now = new Date();
+  return pad(now.getHours()) + ':' + pad(now.getMinutes());
+}
+
+/**
+ * Which control a property deserves. Name matching uses whole tokens on purpose:
+ * a substring test would turn `update` into a date field.
+ */
+function controlFor(key, def) {
+  const format = String(def.format || '').toLowerCase();
+  const words = tokens(key);
+  const has = (word) => words.includes(word);
+
+  if (Array.isArray(def.enum) && def.enum.length) return 'select';
+  if (def.type === 'boolean') return 'checkbox';
+  if (def.type === 'number' || def.type === 'integer') return 'number';
+  if (def.type === 'array' || def.type === 'object') return 'json';
+  if (format === 'date-time' || (has('datetime') || (has('date') && has('time')))) return 'datetime-local';
+  if (format === 'date' || has('date') || has('day') || has('birthday')) return 'date';
+  if (format === 'time' || has('time') || has('hour')) return 'time';
+  if (format === 'email' || has('email') || has('mail')) return 'email';
+  if (format === 'uri' || format === 'url' || has('url') || has('link') || has('href')) return 'url';
+  if (def.maxLength && def.maxLength > 120) return 'textarea';
+  return 'text';
+}
+
+/** Prefills the form with something plausible so Execute is one click away. */
+function smartDefault(key, def, control) {
+  if (def.default !== undefined) return def.default;
+  if (control === 'select') return def.enum[0];
+  if (control === 'checkbox') return false;
+  if (control === 'number') {
+    if (typeof def.minimum === 'number') return def.minimum;
+    return 1;
+  }
+  if (control === 'json') return def.type === 'array' ? [] : {};
+  if (control === 'date') return todayISO();
+  if (control === 'datetime-local') return todayISO() + 'T' + nowHHMM();
+  if (control === 'time') return nowHHMM();
+  if (control === 'email') return 'user@example.com';
+  if (control === 'url') return 'https://example.com';
+
+  const words = tokens(key);
+  if (words.includes('phone') || words.includes('tel')) return '+1 555 0100';
+  if (words.includes('name')) return 'Ada Lovelace';
+  if (typeof def.example === 'string') return def.example;
+  return '';
+}
+
+/** Field controllers for the currently selected tool. */
+let execFields = [];
+let syncingJson = false;
+
+function selectedTool() {
+  return state.tools.find((tool) => tool.name === state.selectedTool) || null;
+}
+
+function renderPicker() {
+  els.execPicker.textContent = '';
+  const hasTools = state.tools.length > 0;
+  els.execEmpty.hidden = hasTools;
+  els.execPicker.hidden = !hasTools;
+
+  if (!hasTools) {
+    els.execBody.hidden = true;
+    return;
+  }
+
+  if (!state.tools.some((tool) => tool.name === state.selectedTool)) {
+    state.selectedTool = state.tools[0].name;
+  }
+
+  for (const tool of state.tools) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'picker__item' + (tool.name === state.selectedTool ? ' is-selected' : '');
+    item.textContent = tool.name;
+    item.addEventListener('click', () => selectTool(tool.name));
+    els.execPicker.appendChild(item);
+  }
+
+  renderExecForm();
+}
+
+function selectTool(name) {
+  state.selectedTool = name;
+  for (const item of els.execPicker.querySelectorAll('.picker__item')) {
+    item.classList.toggle('is-selected', item.textContent === name);
+  }
+  renderExecForm();
+}
+
+function renderExecForm() {
+  const tool = selectedTool();
+  els.execBody.hidden = !tool;
+  els.execResult.hidden = true;
+  execFields = [];
+  els.execForm.textContent = '';
+  if (!tool) return;
+
+  els.execIcon.textContent = iconForTool(tool);
+  els.execName.textContent = humanize(tool.name);
+  els.execDesc.textContent = tool.description || 'No description provided.';
+
+  const schema = schemaOf(tool);
+  const props = propertyNames(schema);
+  const required = requiredNames(schema);
+
+  if (!props.length) {
+    const note = document.createElement('div');
+    note.className = 'pane__empty';
+    note.textContent = 'This tool takes no parameters.';
+    els.execForm.appendChild(note);
+  }
+
+  for (const key of props) {
+    const def = propertyDef(schema, key);
+    const control = controlFor(key, def);
+    const field = document.createElement('div');
+    field.className = 'tool-form__field';
+
+    const label = document.createElement('label');
+    label.textContent = key + (required.includes(key) ? ' *' : '');
+    field.appendChild(label);
+
+    let input;
+    if (control === 'select') {
+      input = document.createElement('select');
+      if (!required.includes(key)) input.appendChild(new Option('', ''));
+      for (const value of def.enum) input.appendChild(new Option(String(value), String(value)));
+    } else if (control === 'checkbox') {
+      input = document.createElement('input');
+      input.type = 'checkbox';
+    } else if (control === 'json' || control === 'textarea') {
+      input = document.createElement('textarea');
+      input.rows = 2;
+    } else {
+      input = document.createElement('input');
+      input.type = control === 'number' ? 'number' : control;
+      if (def.type === 'integer') input.step = '1';
+    }
+
+    const initial = smartDefault(key, def, control);
+    if (control === 'checkbox') input.checked = Boolean(initial);
+    else if (control === 'json') input.value = JSON.stringify(initial);
+    else input.value = initial === undefined || initial === null ? '' : String(initial);
+
+    field.appendChild(input);
+
+    if (def.description) {
+      const hint = document.createElement('span');
+      hint.className = 'hint';
+      hint.textContent = def.description;
+      field.appendChild(hint);
+    }
+
+    els.execForm.appendChild(field);
+
+    execFields.push({
+      key,
+      def,
+      control,
+      required: required.includes(key),
+      read() {
+        if (control === 'checkbox') return input.checked;
+        const raw = input.value;
+        if (raw === '' && !this.required) return undefined;
+        if (control === 'number') {
+          const num = Number(raw);
+          return Number.isNaN(num) ? raw : num;
+        }
+        if (control === 'json') {
+          try {
+            return JSON.parse(raw);
+          } catch (_) {
+            return raw;
+          }
+        }
+        return raw;
+      },
+      write(value) {
+        if (value === undefined) return;
+        if (control === 'checkbox') input.checked = Boolean(value);
+        else if (control === 'json') input.value = JSON.stringify(value);
+        else input.value = String(value);
+      },
+    });
+
+    input.addEventListener('input', syncJsonFromForm);
+    input.addEventListener('change', syncJsonFromForm);
+  }
+
+  syncJsonFromForm();
+}
+
+function readForm() {
+  const args = {};
+  for (const field of execFields) {
+    const value = field.read();
+    if (value !== undefined) args[field.key] = value;
+  }
+  return args;
+}
+
+function markJson(valid) {
+  els.execJson.classList.toggle('is-invalid', !valid);
+  els.execJsonState.classList.toggle('is-invalid', !valid);
+  els.execJsonState.textContent = valid ? 'valid' : 'invalid JSON';
+  els.execRun.disabled = !valid;
+}
+
+function syncJsonFromForm() {
+  if (syncingJson) return;
+  syncingJson = true;
+  els.execJson.value = JSON.stringify(readForm(), null, 2);
+  markJson(true);
+  syncingJson = false;
+}
+
+function syncFormFromJson() {
+  if (syncingJson) return;
+  syncingJson = true;
+  try {
+    const parsed = JSON.parse(els.execJson.value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const field of execFields) field.write(parsed[field.key]);
+      markJson(true);
+    } else {
+      markJson(false);
+    }
+  } catch (_) {
+    markJson(false);
+  }
+  syncingJson = false;
+}
+
+/** The JSON editor wins when it parses: it is the thing the user last edited. */
+function execArguments() {
+  try {
+    const parsed = JSON.parse(els.execJson.value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch (_) { /* fall through */ }
+  return readForm();
+}
+
+async function executeSelectedTool() {
+  const tool = selectedTool();
+  if (!tool) return;
+
+  const args = execArguments();
+  els.execRun.disabled = true;
+  els.execRun.textContent = 'Running…';
+  els.execResult.hidden = false;
+  els.execStatus.className = 'chip';
+  els.execStatus.textContent = '…';
+  els.execOutput.textContent = 'Running…';
+
+  const started = performance.now();
+  const answer = await bridge('execute', { name: tool.name, args });
+  const ms = performance.now() - started;
+  const seconds = (ms / 1000).toFixed(2) + 's';
+
+  const ok = !(!answer || answer.error);
+  const output = ok
+    ? resultToText(answer.result)
+    : (answer && answer.error) || 'Unknown error.';
+
+  els.execStatus.className = 'chip ' + (ok ? 'chip--ok' : 'chip--err');
+  els.execStatus.textContent = (ok ? '✔ Success · ' : '✖ Error · ') + seconds;
+  els.execOutput.textContent = ok ? pretty(answer.result) : output;
+
+  els.execRun.disabled = false;
+  els.execRun.textContent = '▶ Execute Tool';
+
+  recordExecution({ tool: tool.name, origin: 'manual', args, ok, output, ms });
+}
+
+// --- History tab -----------------------------------------------------------
+
+async function loadHistory() {
+  const stored = await chrome.storage.local.get('history');
+  state.history = Array.isArray(stored.history) ? stored.history : [];
+  renderHistory();
+}
+
+function recordExecution(entry) {
+  state.history.unshift(Object.assign({ ts: Date.now() }, entry));
+  if (state.history.length > HISTORY_LIMIT) state.history.length = HISTORY_LIMIT;
+  chrome.storage.local.set({ history: state.history });
+  renderHistory();
+}
+
+function renderHistory() {
+  els.historyList.textContent = '';
+  els.historyEmpty.hidden = state.history.length > 0;
+  els.historyCount.textContent = state.history.length
+    ? state.history.length + (state.history.length === 1 ? ' execution' : ' executions')
+    : '';
+
+  for (const entry of state.history) {
+    const item = document.createElement('div');
+    item.className = 'hist ' + (entry.ok ? 'hist--ok' : 'hist--err');
+
+    const head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'hist__head';
+
+    const icon = document.createElement('span');
+    icon.textContent = entry.ok ? '✔' : '✖';
+    const name = document.createElement('span');
+    name.className = 'hist__name';
+    name.textContent = entry.tool;
+    const origin = document.createElement('span');
+    origin.className = 'hist__origin';
+    origin.textContent = entry.origin === 'manual' ? 'manual' : 'chat';
+    const meta = document.createElement('span');
+    meta.className = 'hist__meta';
+    const when = new Date(entry.ts);
+    meta.textContent = pad(when.getHours()) + ':' + pad(when.getMinutes()) + ':' + pad(when.getSeconds())
+      + (typeof entry.ms === 'number' ? ' · ' + (entry.ms / 1000).toFixed(2) + 's' : '');
+    head.append(icon, name, origin, meta);
+
+    const body = document.createElement('div');
+    body.className = 'hist__body';
+
+    const argsLabel = document.createElement('div');
+    argsLabel.className = 'field-label';
+    argsLabel.textContent = 'Arguments';
+    const argsPre = document.createElement('pre');
+    argsPre.className = 'json-view';
+    argsPre.textContent = pretty(entry.args || {});
+
+    const outLabel = document.createElement('div');
+    outLabel.className = 'field-label';
+    outLabel.textContent = entry.ok ? 'Output' : 'Error';
+    const outPre = document.createElement('pre');
+    outPre.className = 'json-view';
+    outPre.textContent = String(entry.output);
+
+    body.append(argsLabel, argsPre, outLabel, outPre);
+    item.append(head, body);
+    head.addEventListener('click', () => item.classList.toggle('is-open'));
+    els.historyList.appendChild(item);
+  }
+}
+
+// --- Chat ------------------------------------------------------------------
+
+function scrollToBottom() {
+  els.chat.scrollTop = els.chat.scrollHeight;
+}
+
+function clearEmptyState() {
+  const empty = els.chat.querySelector('.empty');
+  if (empty) empty.remove();
+}
 
 function addMessage(role, text) {
   clearEmptyState();
@@ -134,7 +858,6 @@ function addMessage(role, text) {
   return div;
 }
 
-/** Assistant bubble that fills in as the response streams. */
 function createAssistantBubble() {
   clearEmptyState();
   const wrapper = document.createElement('div');
@@ -193,7 +916,6 @@ function createAssistantBubble() {
   };
 }
 
-/** Visual block for a single tool call. */
 function createToolCard(name, args) {
   clearEmptyState();
   const card = document.createElement('div');
@@ -235,7 +957,6 @@ function createToolCard(name, args) {
   }
 
   return {
-    element: card,
     done(text) {
       card.classList.add('toolcall--ok');
       stateEl.textContent = 'ok';
@@ -251,7 +972,6 @@ function createToolCard(name, args) {
       stateEl.textContent = 'cancelled';
       addResult('Status', text);
     },
-    /** Shows the confirmation buttons and waits for the decision. */
     confirm() {
       stateEl.textContent = 'awaiting confirmation';
       return new Promise((resolve) => {
@@ -278,439 +998,6 @@ function createToolCard(name, args) {
       });
     },
   };
-}
-
-// --- Ollama models ---------------------------------------------------------
-
-async function fetchLocalModels() {
-  els.refreshModels.classList.add('is-spinning');
-  els.refreshModels.disabled = true;
-
-  let lastError = null;
-  for (const host of OLLAMA_HOSTS) {
-    try {
-      const response = await fetch(host + '/api/tags', { cache: 'no-store' });
-      if (response.status === 403) {
-        // Ollama is alive but rejects our origin: stop trying other hosts, a
-        // "not detected" message would be misleading.
-        state.host = host;
-        state.ollamaOk = false;
-        state.models = [];
-        state.model = '';
-        renderModelOptions('Ollama rejects the extension');
-        showStatus(CORS_HINT);
-        updateSendState();
-        return;
-      }
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const data = await response.json();
-      const models = (data.models || [])
-        .map((entry) => ({
-          name: entry.name || entry.model,
-          size: entry.size || 0,
-          capabilities: entry.capabilities || [],
-        }))
-        .filter((entry) => entry.name)
-        .sort((a, b) => a.name.localeCompare(b.name));
-
-      state.host = host;
-      state.models = models;
-      state.ollamaOk = models.length > 0;
-
-      if (!models.length) {
-        renderModelOptions('No models pulled');
-        showStatus('Ollama is running but has no models. Pull one with: ollama pull qwen3:8b');
-        updateSendState();
-        return;
-      }
-
-      const stored = await chrome.storage.local.get('selectedModel');
-      const preferred = models.some((m) => m.name === stored.selectedModel)
-        ? stored.selectedModel
-        : models[0].name;
-
-      renderModelOptions();
-      els.modelSelect.value = preferred;
-      state.model = preferred;
-      showStatus('');
-      updateSendState();
-      return;
-    } catch (err) {
-      lastError = err;
-    }
-  }
-
-  state.ollamaOk = false;
-  state.models = [];
-  state.model = '';
-  renderModelOptions('Ollama not detected');
-  showStatus(
-    'Ollama not detected on 127.0.0.1:11434. Start it with "ollama serve" and hit 🔄. '
-    + (lastError ? '(' + lastError.message + ')' : '')
-  );
-  updateSendState();
-}
-
-function renderModelOptions(placeholder) {
-  els.modelSelect.textContent = '';
-  if (placeholder) {
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = placeholder;
-    els.modelSelect.appendChild(option);
-    els.modelSelect.disabled = true;
-    return;
-  }
-  els.modelSelect.disabled = false;
-  for (const model of state.models) {
-    const option = document.createElement('option');
-    option.value = model.name;
-    const gb = model.size ? ' · ' + (model.size / 1e9).toFixed(1) + ' GB' : '';
-    const tools = model.capabilities.includes('tools') ? ' · tools' : '';
-    option.textContent = model.name + gb + tools;
-    els.modelSelect.appendChild(option);
-  }
-}
-
-// --- Page tools ------------------------------------------------------------
-
-async function currentTabId() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  state.tabId = tab ? tab.id : null;
-  return state.tabId;
-}
-
-async function bridge(action, payload) {
-  try {
-    const answer = await chrome.runtime.sendMessage({
-      type: 'bridge',
-      tabId: state.tabId,
-      action,
-      payload,
-    });
-    return answer || { result: null, error: 'The service worker did not respond.' };
-  } catch (err) {
-    return { result: null, error: String((err && err.message) || err) };
-  }
-}
-
-async function detectPageTools() {
-  els.refreshTools.classList.add('is-spinning');
-  try {
-    await currentTabId();
-    if (state.tabId == null) {
-      state.tools = [];
-      renderToolsBadge('No active tab');
-      return;
-    }
-
-    const answer = await bridge('list', null);
-    if (!answer || answer.error) {
-      state.tools = [];
-      renderToolsBadge('0 tools');
-      els.toolsList.textContent = '';
-      els.toolsList.hidden = true;
-      return;
-    }
-
-    state.tools = Array.isArray(answer.result) ? answer.result : [];
-    renderToolsBadge();
-    renderToolsList();
-  } finally {
-    els.refreshTools.classList.remove('is-spinning');
-  }
-}
-
-function renderToolsBadge(text) {
-  const count = state.tools.length;
-  els.toolsBadgeText.textContent = text || (count === 1 ? '1 tool detected' : count + ' tools detected');
-  els.toolsBadge.classList.toggle('has-tools', count > 0);
-}
-
-// --- Tool inspector cards --------------------------------------------------
-
-const TOOL_ICONS = [
-  [/(book|reserve|schedul|appointment|slot|calendar|date)/, '📅'],
-  [/(cart|buy|order|checkout|purchas|pay)/, '🛒'],
-  [/(search|find|query|lookup)/, '🔍'],
-  [/(add|create|new|insert|append)/, '➕'],
-  [/(delete|remove|clear|cancel)/, '🗑'],
-  [/(list|todos|items|all|get|read|fetch|info)/, '📋'],
-  [/(update|edit|set|change|toggle)/, '✏️'],
-  [/(theme|color|style|dark|light)/, '🎨'],
-  [/(send|mail|message|notify|email)/, '✉️'],
-  [/(user|account|profile|login|auth)/, '👤'],
-  [/(nav|open|go|route|scroll|click)/, '🧭'],
-];
-
-function iconForTool(tool) {
-  const haystack = (tool.name + ' ' + (tool.description || '')).toLowerCase();
-  for (const [pattern, icon] of TOOL_ICONS) {
-    if (pattern.test(haystack)) return icon;
-  }
-  return '⚡';
-}
-
-/** `checkInDate` / `check_in_date` / `check-in-date` -> `Check In Date`. */
-function humanizeParam(key) {
-  return String(key)
-    .replace(/[_-]+/g, ' ')
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function schemaOf(tool) {
-  const schema = tool.inputSchema || tool.parameters;
-  return schema && typeof schema === 'object' && !Array.isArray(schema) ? schema : {};
-}
-
-function propertyNames(schema) {
-  const props = schema.properties;
-  return props && typeof props === 'object' ? Object.keys(props) : [];
-}
-
-function requiredNames(schema) {
-  return Array.isArray(schema.required) ? schema.required : [];
-}
-
-/** Plain-language summary of what the tool asks for. */
-function describeNeeds(props, required) {
-  if (!props.length) return 'No input needed.';
-  const primary = (required.length ? required : props).map(humanizeParam);
-  if (props.length === 1) return 'Needs: ' + primary[0] + '.';
-  // "and more" tracks the total, not just the sample: a tool with 2 required and
-  // 2 optional params still asks for 4 things.
-  const shown = primary.slice(0, 2);
-  const more = props.length > shown.length;
-  const sample = more ? shown.join(', ') + ' and more' : shown.join(' and ');
-  return 'Needs ' + props.length + ' details (like ' + sample + ').';
-}
-
-function makeSection(labelText) {
-  const section = document.createElement('div');
-  section.className = 'tool-card__section';
-  const label = document.createElement('div');
-  label.className = 'tool-card__label';
-  label.textContent = labelText;
-  section.appendChild(label);
-  return section;
-}
-
-/** Small form so a tool can be tried by hand, typed from its JSON Schema. */
-function buildToolForm(schema, props) {
-  const form = document.createElement('div');
-  form.className = 'tool-form';
-  const required = requiredNames(schema);
-  const readers = [];
-
-  for (const key of props) {
-    const def = (schema.properties && schema.properties[key]) || {};
-    const field = document.createElement('div');
-    field.className = 'tool-form__field';
-
-    const label = document.createElement('label');
-    label.textContent = key + (required.includes(key) ? ' *' : '');
-    field.appendChild(label);
-
-    let input;
-    if (Array.isArray(def.enum) && def.enum.length) {
-      input = document.createElement('select');
-      if (!required.includes(key)) input.appendChild(new Option('', ''));
-      for (const value of def.enum) input.appendChild(new Option(String(value), String(value)));
-    } else if (def.type === 'boolean') {
-      input = document.createElement('input');
-      input.type = 'checkbox';
-    } else if (def.type === 'number' || def.type === 'integer') {
-      input = document.createElement('input');
-      input.type = 'number';
-      if (def.type === 'integer') input.step = '1';
-    } else {
-      input = document.createElement('input');
-      input.type = 'text';
-    }
-    if (def.description) {
-      input.title = def.description;
-      if (input.type === 'text' || input.type === 'number') input.placeholder = def.description;
-    }
-
-    field.appendChild(input);
-    form.appendChild(field);
-
-    readers.push(() => {
-      if (def.type === 'boolean') return [key, input.checked];
-      const raw = input.value;
-      if (raw === '' && !required.includes(key)) return null;
-      if (def.type === 'number' || def.type === 'integer') {
-        const num = Number(raw);
-        return [key, Number.isNaN(num) ? raw : num];
-      }
-      if (def.type === 'array' || def.type === 'object') {
-        try {
-          return [key, JSON.parse(raw)];
-        } catch (_) {
-          return [key, raw];
-        }
-      }
-      return [key, raw];
-    });
-  }
-
-  return {
-    element: form,
-    read() {
-      const args = {};
-      for (const reader of readers) {
-        const entry = reader();
-        if (entry) args[entry[0]] = entry[1];
-      }
-      return args;
-    },
-  };
-}
-
-function createToolListItem(tool) {
-  const schema = schemaOf(tool);
-  const props = propertyNames(schema);
-  const required = requiredNames(schema);
-
-  const card = document.createElement('div');
-  card.className = 'tool-card';
-  if (state.openTools.has(tool.name)) card.classList.add('is-open');
-
-  // --- Header (always visible)
-  const head = document.createElement('button');
-  head.type = 'button';
-  head.className = 'tool-card__head';
-  head.setAttribute('aria-expanded', String(card.classList.contains('is-open')));
-
-  const icon = document.createElement('span');
-  icon.className = 'tool-card__icon';
-  icon.textContent = iconForTool(tool);
-
-  const titles = document.createElement('div');
-  titles.className = 'tool-card__titles';
-  const title = document.createElement('div');
-  title.className = 'tool-card__name';
-  title.textContent = humanizeParam(tool.name);
-  const id = document.createElement('div');
-  id.className = 'tool-card__id';
-  id.textContent = tool.name;
-  const teaser = document.createElement('div');
-  teaser.className = 'tool-card__teaser';
-  teaser.textContent = tool.description || 'No description provided.';
-  titles.append(title, id, teaser);
-
-  const chevron = document.createElement('span');
-  chevron.className = 'tool-card__chevron';
-  chevron.textContent = '▼';
-
-  head.append(icon, titles, chevron);
-
-  // --- Expandable body
-  const details = document.createElement('div');
-  details.className = 'tool-card__details';
-  const inner = document.createElement('div');
-  details.appendChild(inner);
-
-  const does = makeSection('What it does');
-  const doesText = document.createElement('div');
-  doesText.className = 'tool-card__text';
-  doesText.textContent = tool.description || 'The page did not provide a description.';
-  does.appendChild(doesText);
-
-  const needs = makeSection('What it needs');
-  const needsText = document.createElement('div');
-  needsText.className = 'tool-card__text';
-  needsText.textContent = describeNeeds(props, required);
-  needs.appendChild(needsText);
-
-  inner.append(does, needs);
-
-  if (props.length) {
-    const params = makeSection('Parameters');
-    const pills = document.createElement('div');
-    pills.className = 'pills';
-    for (const key of props) {
-      const pill = document.createElement('span');
-      pill.className = 'pill' + (required.includes(key) ? ' pill--required' : '');
-      const def = (schema.properties && schema.properties[key]) || {};
-      pill.textContent = key + (def.type ? ':' + def.type : '');
-      if (def.description) pill.title = def.description;
-      pills.appendChild(pill);
-    }
-    params.appendChild(pills);
-    inner.appendChild(params);
-  }
-
-  // --- Manual run
-  const runSection = makeSection('Try it');
-  const form = buildToolForm(schema, props);
-  if (props.length) runSection.appendChild(form.element);
-  const output = document.createElement('div');
-  output.className = 'tool-out';
-  output.hidden = true;
-  runSection.appendChild(output);
-  inner.appendChild(runSection);
-
-  // --- Footer
-  const foot = document.createElement('div');
-  foot.className = 'tool-card__foot';
-  const via = document.createElement('span');
-  via.textContent = 'Registered via';
-  const source = document.createElement('span');
-  source.className = 'pill tool-card__source';
-  source.textContent = '⚙️ JavaScript API';
-  // The raw object the tool came from is more precise than the friendly label.
-  if (tool.source) source.title = tool.source;
-  const run = document.createElement('button');
-  run.type = 'button';
-  run.className = 'tool-card__run';
-  run.textContent = 'Run ▶';
-  foot.append(via, source, run);
-
-  card.append(head, details, foot);
-
-  // --- Behaviour
-  head.addEventListener('click', () => {
-    const open = card.classList.toggle('is-open');
-    head.setAttribute('aria-expanded', String(open));
-    if (open) state.openTools.add(tool.name);
-    else state.openTools.delete(tool.name);
-  });
-
-  run.addEventListener('click', async () => {
-    if (!card.classList.contains('is-open')) head.click();
-    run.disabled = true;
-    run.textContent = 'Running…';
-    output.hidden = false;
-    output.className = 'tool-out';
-    output.textContent = 'Running…';
-
-    const answer = await bridge('execute', { name: tool.name, args: form.read() });
-    if (!answer || answer.error) {
-      output.className = 'tool-out tool-out--err';
-      output.textContent = (answer && answer.error) || 'Unknown error.';
-    } else {
-      output.textContent = resultToText(answer.result);
-    }
-    run.disabled = false;
-    run.textContent = 'Run ▶';
-  });
-
-  return card;
-}
-
-function renderToolsList() {
-  els.toolsList.textContent = '';
-  if (!state.tools.length) {
-    els.toolsList.hidden = true;
-    return;
-  }
-  for (const tool of state.tools) {
-    els.toolsList.appendChild(createToolListItem(tool));
-  }
 }
 
 function normalizeSchema(schema) {
@@ -752,14 +1039,8 @@ function resultToText(result) {
   return pretty(result);
 }
 
-// --- Chat loop -------------------------------------------------------------
-
 async function ollamaChat(messages, tools, onDelta) {
-  const body = {
-    model: state.model,
-    messages,
-    stream: true,
-  };
+  const body = { model: state.model, messages, stream: true };
   if (tools.length) body.tools = tools;
 
   const response = await fetch(state.host + '/api/chat', {
@@ -777,7 +1058,7 @@ async function ollamaChat(messages, tools, onDelta) {
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  const accumulated = { role: 'assistant', content: '', thinking: '', tool_calls: [] };
+  const accumulated = { content: '', thinking: '', tool_calls: [] };
   let buffer = '';
 
   const handleLine = (line) => {
@@ -799,9 +1080,7 @@ async function ollamaChat(messages, tools, onDelta) {
       accumulated.content += message.content;
       onDelta('content', message.content);
     }
-    if (Array.isArray(message.tool_calls)) {
-      accumulated.tool_calls.push(...message.tool_calls);
-    }
+    if (Array.isArray(message.tool_calls)) accumulated.tool_calls.push(...message.tool_calls);
   };
 
   for (;;) {
@@ -841,10 +1120,15 @@ async function runToolCall(call) {
   const args = parseArguments(fn.arguments);
   const card = createToolCard(name || '(unnamed)', args);
 
+  const finish = (ok, output) => {
+    recordExecution({ tool: String(name || 'unknown'), origin: 'chat', args, ok, output });
+    return { role: 'tool', tool_name: String(name || 'unknown'), content: ok ? output : 'Error: ' + output };
+  };
+
   if (!name || !state.tools.some((tool) => tool.name === name)) {
     const text = 'The page exposes no tool named "' + String(name) + '".';
     card.fail(text);
-    return { role: 'tool', tool_name: String(name || 'unknown'), content: 'Error: ' + text };
+    return finish(false, text);
   }
 
   if (els.confirmTools.checked) {
@@ -852,19 +1136,25 @@ async function runToolCall(call) {
     if (!approved) {
       const text = 'The user cancelled this tool call.';
       card.cancelled(text);
+      recordExecution({ tool: name, origin: 'chat', args, ok: false, output: text });
       return { role: 'tool', tool_name: name, content: text };
     }
   }
 
+  const started = performance.now();
   const answer = await bridge('execute', { name, args });
+  const ms = performance.now() - started;
+
   if (!answer || answer.error) {
     const text = (answer && answer.error) || 'Unknown error while running the tool.';
     card.fail(text);
+    recordExecution({ tool: name, origin: 'chat', args, ok: false, output: text, ms });
     return { role: 'tool', tool_name: name, content: 'Error: ' + text };
   }
 
   const text = resultToText(answer.result);
   card.done(text);
+  recordExecution({ tool: name, origin: 'chat', args, ok: true, output: text, ms });
   return { role: 'tool', tool_name: name, content: text };
 }
 
@@ -877,11 +1167,10 @@ async function runAgent() {
     try {
       reply = await ollamaChat(state.messages, tools, (kind, delta) => bubble.append(kind, delta));
     } catch (err) {
-      const message = String((err && err.message) || err);
       // A 403 will not fix itself on retry: Ollama has to be reconfigured, so
       // keep the hint pinned in the status bar as well as in the chat.
       if (err && err.status === 403) showStatus(CORS_HINT);
-      bubble.fail('Failed to reach Ollama: ' + message);
+      bubble.fail('Failed to reach Ollama: ' + String((err && err.message) || err));
       return;
     }
 
@@ -889,7 +1178,6 @@ async function runAgent() {
     state.messages.push(reply);
 
     if (!reply.tool_calls || !reply.tool_calls.length) return;
-
     for (const call of reply.tool_calls) {
       state.messages.push(await runToolCall(call));
     }
@@ -927,26 +1215,20 @@ function autoGrow() {
   els.input.style.height = Math.min(els.input.scrollHeight, 160) + 'px';
 }
 
-els.input.addEventListener('input', () => {
-  autoGrow();
-  updateSendState();
-});
+for (const button of document.querySelectorAll('.tab')) {
+  button.addEventListener('click', () => setTab(button.dataset.tab));
+}
 
+els.input.addEventListener('input', () => { autoGrow(); updateSendState(); });
 els.input.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     sendMessage();
   }
 });
-
 els.send.addEventListener('click', sendMessage);
 
-els.refreshModels.addEventListener('click', async () => {
-  await fetchLocalModels();
-  els.refreshModels.classList.remove('is-spinning');
-  els.refreshModels.disabled = false;
-});
-
+els.refreshModels.addEventListener('click', fetchLocalModels);
 els.modelSelect.addEventListener('change', () => {
   state.model = els.modelSelect.value;
   chrome.storage.local.set({ selectedModel: state.model });
@@ -954,10 +1236,15 @@ els.modelSelect.addEventListener('change', () => {
 });
 
 els.refreshTools.addEventListener('click', detectPageTools);
+els.toolsBadge.addEventListener('click', () => setTab('tools'));
 
-els.toolsBadge.addEventListener('click', () => {
-  if (!state.tools.length) return;
-  els.toolsList.hidden = !els.toolsList.hidden;
+els.execJson.addEventListener('input', syncFormFromJson);
+els.execRun.addEventListener('click', executeSelectedTool);
+
+els.historyClear.addEventListener('click', () => {
+  state.history = [];
+  chrome.storage.local.set({ history: [] });
+  renderHistory();
 });
 
 els.clearChat.addEventListener('click', () => {
@@ -990,13 +1277,12 @@ chrome.runtime.onMessage.addListener((message) => {
 // --- Bootstrap -------------------------------------------------------------
 
 (async function init() {
-  const stored = await chrome.storage.local.get('confirmTools');
+  const stored = await chrome.storage.local.get(['confirmTools', 'activeTab']);
   els.confirmTools.checked = Boolean(stored.confirmTools);
+  setTab(stored.activeTab || 'chat');
 
+  await loadHistory();
   await fetchLocalModels();
-  els.refreshModels.classList.remove('is-spinning');
-  els.refreshModels.disabled = false;
-
   await detectPageTools();
   els.input.focus();
 })();

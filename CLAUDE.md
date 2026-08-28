@@ -32,7 +32,7 @@ Repo language is **English** — code, comments, UI strings, docs and commit mes
 | `page-hook.js` | MAIN | Wraps `provideContext` / `registerTool` / `unregisterTool` to track tools and keep the real reference to `execute`. Answers `list` and `execute` over `postMessage`. |
 | `content.js` | ISOLATED | Bridge. Opens `chrome.runtime.connect({name:'webmcp-bridge'})` **towards** the SW. |
 | `background.js` | SW | `tabId → Port` map, request/response routing with timeouts, `sidePanel.setPanelBehavior`, rescue injection via `scripting.executeScript`. |
-| `sidepanel.{html,css,js}` | panel | UI + tool-calling loop against `/api/chat`. |
+| `sidepanel.{html,css,js}` | panel | Four tabs (`#tab-chat`, `#tab-tools`, `#tab-execute`, `#tab-history`) over one shared `state`, plus the tool-calling loop against `/api/chat`. Fixed dark theme, no light mode. |
 | `demo/webmcp-demo.html` | — | Test page with a `navigator.modelContext` polyfill and 4 tools. |
 | `build.ps1` | — | Validates + packages into `dist/webmcp-local-agent-<version>.zip`. |
 | `.github/workflows/build.yml` | — | CI: runs `build.ps1` (pwsh is preinstalled on `ubuntu-latest`), uploads the artifact and publishes a release on `v*` tags. |
@@ -52,6 +52,26 @@ Repo language is **English** — code, comments, UI strings, docs and commit mes
   `execute({ name, arguments })`, because implementations differ.
 - Everything crossing `postMessage` goes through `JSON.parse(JSON.stringify(...))`: tool
   results may carry functions or DOM nodes and would break `structuredClone`.
+
+## Side panel internals
+
+- `state` is the single source of truth; every `render*()` reads from it. `detectPageTools()`
+  re-renders the Tools list and the Execute picker, and runs before every chat turn.
+- Persisted in `chrome.storage.local`: `selectedModel`, `confirmTools`, `activeTab`,
+  `history` (capped at `HISTORY_LIMIT`, newest first). Nothing else survives a reload —
+  the conversation itself is deliberately in-memory.
+- `state.openTools` keeps expanded tool cards open across the re-render that happens on
+  every message.
+- **Execute tab.** `controlFor()` picks the input type and `smartDefault()` prefills it.
+  Name heuristics match **whole tokens**, never substrings: `/date/` on `update` would
+  turn it into a date picker. `tokens()` splits camelCase/snake/kebab first.
+- The live JSON editor and the form sync both ways behind a `syncingJson` guard to avoid
+  a feedback loop. `execArguments()` prefers the JSON when it parses — it is what the user
+  edited last — and falls back to reading the form.
+- **Only one execution UI.** `Run ▶` on a tool card selects the tool and switches to
+  Execute rather than duplicating the form logic. Keep it that way.
+- `recordExecution()` is called from both the manual path and `runToolCall()`, so History
+  covers manual and model-driven runs alike.
 
 ## Gotchas
 

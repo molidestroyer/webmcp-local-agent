@@ -104,26 +104,48 @@ does not), then creates the GitHub release with the zip attached.
 
 ## Usage
 
-1. Open a page that exposes WebMCP tools. If you have none at hand, use the bundled one:
-   open `demo/webmcp-demo.html` in Chrome (drag the file onto a tab).
-2. Click the extension icon.
-3. Pick a model. The choice is saved to `chrome.storage.local` and remembered.
-4. The header badge shows how many tools were detected (`3 tools detected`). Click it to
-   see each tool's name and description.
-5. Type. If the model decides to use a tool, you get a 🔧 card with its name, the JSON
-   arguments and the result; the model then writes the final answer.
+Open a page that exposes WebMCP tools. If you have none at hand, use the bundled one:
+open `demo/webmcp-demo.html` in Chrome (drag the file onto a tab).
+
+**The toolbar icon tells you when a page has tools** — a green badge with the count appears
+without opening anything. It is per-tab and clears on navigation.
+
+Click the icon to open the panel. The header holds the tool count, the re-inspect button
+and the Ollama model picker (persisted in `chrome.storage.local`). Below it, four tabs:
+
+| Tab | What it is for |
+| --- | --- |
+| 💬 **Chat** | Talk to the model. It calls the page's tools on its own; each call shows up as a card with its arguments and result. `Enter` sends, `Shift+Enter` adds a line. |
+| 🧰 **Tools** | One card per detected tool: icon, title, full description, a plain-language summary of what it needs, a pill per parameter with its type (`*` = required) and where it was registered. `Run ▶` hands the tool over to Execute. |
+| ▶ **Execute** | Run a tool by hand, no model involved. Pick it from the chips, fill the generated form, hit `▶ Execute Tool`. |
+| 📜 **History** | Every execution — manual and model-driven — with timestamp, duration, arguments and output. Persisted across sessions, capped at 100 entries. |
 
 With the bundled demo you can try: *"add buy bread"*, *"what is still pending?"*,
 *"mark #1 as done"*, *"switch the page to dark mode"*.
 
-### Controls
+### The Execute tab
+
+The form is generated from the tool's JSON Schema and typed accordingly: `format: date`
+becomes a date picker, `enum` a `<select>`, `boolean` a checkbox, `integer` a number input.
+
+Fields arrive **prefilled with plausible values** — today's date for dates, the current
+time for times, `user@example.com` for emails, the schema `default` or `minimum` when it
+declares one — so most tools are one click from running.
+
+Underneath, a **live JSON editor** stays in sync in both directions: edit a field and the
+JSON updates, edit the JSON and the fields follow. While the JSON does not parse the state
+chip turns red and `Execute` is disabled, so a malformed payload never reaches the page.
+When it does parse, the JSON wins — it is what you edited last.
+
+The result appears with a status chip (`✔ Success · 0.42s` / `✖ Error · 0.02s`) and the raw
+response, and the run is added to History.
+
+### Chat controls
 
 | Control | What it does |
 | --- | --- |
-| Model `<select>` | Lists whatever `GET /api/tags` returns. Selection is persisted. |
-| 🔄 | Queries `/api/tags` again (use it after an `ollama pull` in a terminal). |
-| Tools badge | Shows/hides the list of detected tools. |
-| ⟳ | Re-inspects the active tab. |
+| 🔄 (header, right) | Re-inspects the active tab. |
+| 🔄 (model row) | Queries `/api/tags` again — use it after an `ollama pull` in a terminal. |
 | 🗑 | Clears the conversation. |
 | ☑ Confirm every tool | Asks for your approval before each call. Off by default. |
 
@@ -147,7 +169,10 @@ sidepanel.js ──chrome.runtime──> background.js ──Port──> content
   `tabs.sendMessage` is never used.
 - **`background.js`** keeps the `tabId → Port` map and routes request/response. If a tab
   has no bridge (it was open before the extension was installed), it injects one with
-  `chrome.scripting.executeScript`, relying on `activeTab`.
+  `chrome.scripting.executeScript`, relying on `activeTab`. It also drives the per-tab
+  toolbar badge: it counts the tools shortly after a bridge connects, on every
+  `tools-changed` event and on every listing the panel asks for, and clears it when a tab
+  starts navigating.
 - **`sidepanel.js`** translates each WebMCP tool into Ollama's format
   (`{ type: "function", function: { name, description, parameters } }`), calls
   `POST /api/chat` with `stream: true`, accumulates `tool_calls`, runs them on the page,
