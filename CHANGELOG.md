@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.4.4
+
+Two failures reported against a real page, both confirmed against the upstream
+inspector's source.
+
+### "Failed to parse input string as JSON" on every execution
+
+The spec declares `executeTool(tool, optional object inputObject)`, so the
+arguments were passed as an object. The shipping implementation takes them as a
+JSON **string**: an object converts to `"[object Object]"`, which then fails to
+parse. The upstream inspector passes its textarea contents straight through, a
+string, which is why the same JSON worked there.
+
+`callExecuteTool()` now sends the object, and retries once with
+`JSON.stringify(args)` **only** on the platform's own parse-failure message.
+That message is raised while converting the arguments, before the tool runs, so
+nothing can execute twice; every other rejection propagates untouched and is
+never replayed. The accepted form is cached per context, so a page is probed at
+most once.
+
+### The badge and the tool list went stale on tab switch
+
+`background.js` had no `chrome.tabs.onActivated` handler at all, and its
+`onUpdated` handler only *cleared* the badge. The count was computed once, when
+a tab's bridge connected. Both events now refresh it, matching what the upstream
+inspector does.
+
+Declarative tools made this worse: they are markup, so they appear and disappear
+with client-side navigation without anything calling
+`provideContext()`/`registerTool()` — the wrappers that drive `tools-changed`
+never fire for them. The page hook now watches the document for
+`form[toolname]` appearing or disappearing, throttled, and reports the change.
+The side panel also re-inspects when it becomes visible again.
+
 ## 0.4.3
 
 Tool cards no longer claim every tool was registered from JavaScript.

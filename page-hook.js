@@ -188,6 +188,41 @@
     for (const entry of contextObjects()) patch(entry.obj, entry.label);
   }
 
+  // Declarative tools are markup: they appear and disappear with client-side
+  // navigation, and nothing calls provideContext()/registerTool() for them, so
+  // the wrappers above never fire. Watch the document instead.
+  let lastFormSignature = '';
+  let formCheckTimer = null;
+
+  function formSignature() {
+    try {
+      return [...document.querySelectorAll('form[toolname]')]
+        .map((form) => form.getAttribute('toolname'))
+        .sort()
+        .join('|');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function scheduleFormCheck() {
+    // Throttled: a busy SPA mutates constantly and the query is not free.
+    if (formCheckTimer) return;
+    formCheckTimer = setTimeout(() => {
+      formCheckTimer = null;
+      const signature = formSignature();
+      if (signature !== lastFormSignature) {
+        lastFormSignature = signature;
+        notifyToolsChanged();
+      }
+    }, 400);
+  }
+
+  try {
+    new MutationObserver(scheduleFormCheck)
+      .observe(document.documentElement, { childList: true, subtree: true });
+  } catch (_) { /* noop */ }
+
   // The API may show up later (polyfills, deferred bundles), so keep retrying.
   patchAll();
   document.addEventListener('DOMContentLoaded', patchAll, { once: true });
@@ -228,7 +263,7 @@
     // name. That object is realm-bound, so it is looked up again right now
     // rather than cached from discovery or sent across extension messaging.
     const resolved = await S.resolveRegisteredTool(contexts, name, origin);
-    if (resolved) return resolved.context.executeTool(resolved.tool, params);
+    if (resolved) return S.callExecuteTool(resolved.context, resolved.tool, params);
 
     // Imperative registration: the page handed us the callback itself.
     const entry = registry.get(name);

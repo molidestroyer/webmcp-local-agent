@@ -120,6 +120,29 @@ hardcode a value (it did, and reported every declarative form as "JavaScript API
 could not have seen a registration that predates it. `descriptor.installedEarly` records
 whether we were in place at `document_start`, so that case remains distinguishable.
 
+## executeTool argument form
+
+The spec says `executeTool(tool, optional object inputObject)`; the shipping
+implementation wants a **JSON string** and answers `Failed to parse input string as JSON`
+for an object (it stringifies to `"[object Object]"`). `callExecuteTool()` sends the
+object, then retries once with `JSON.stringify(args)` **only** on that exact message —
+which the platform raises before the tool runs, so nothing executes twice. Every other
+rejection propagates untouched: never widen that regex into a generic retry, or a failing
+`createFeature` will create two features. The result is cached per context in a WeakMap.
+
+## Keeping the badge and tool list fresh
+
+Three signals, and all three are needed:
+
+- `chrome.tabs.onActivated` and `onUpdated` (`complete`) in `background.js` → `refreshBadge`.
+  Without these the count is only ever computed when a tab's bridge connects.
+- `tools-changed` from the wrapped `provideContext`/`registerTool` → script registrations.
+- A throttled `MutationObserver` on `form[toolname]` in `page-hook.js` → **declarative**
+  tools, which are markup and come and go with client-side navigation without any script
+  call the wrappers could see.
+
+The side panel also re-inspects on `visibilitychange`.
+
 ## Gotchas
 
 - After reloading the extension you must **F5 the open tabs**; content scripts are not

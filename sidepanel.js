@@ -1306,7 +1306,12 @@ els.confirmTools.addEventListener('change', () => {
   chrome.storage.local.set({ confirmTools: els.confirmTools.checked });
 });
 
-chrome.tabs.onActivated.addListener(detectPageTools);
+chrome.tabs.onActivated.addListener(() => detectPageTools());
+// Coming back to the panel after it was hidden: the active tab may have moved
+// on without us.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) detectPageTools();
+});
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (tabId === state.tabId && changeInfo.status === 'complete') detectPageTools();
 });

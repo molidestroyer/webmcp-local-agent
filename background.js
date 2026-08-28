@@ -44,7 +44,12 @@ async function refreshBadge(tabId) {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   // A navigation invalidates whatever we knew about that tab.
   if (changeInfo.status === 'loading') setBadge(tabId, 0);
+  else if (changeInfo.status === 'complete') refreshBadge(tabId);
 });
+
+// Switching tabs has to re-badge: the count is per tab, and the previous one
+// was only ever computed when that tab's bridge connected.
+chrome.tabs.onActivated.addListener(({ tabId }) => refreshBadge(tabId));
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'webmcp-bridge') return;
