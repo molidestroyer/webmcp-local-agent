@@ -24,13 +24,33 @@ const CORS_HINT = 'Ollama is rejecting the extension origin (403). Allow it: on 
   + '(setx only affects newly started processes).';
 
 const SYSTEM_PROMPT = [
-  'You are an agent helping the user with the web page they currently have open.',
-  'The page may expose tools (WebMCP). Use them whenever they help you answer or',
-  'act on the page, passing exactly the arguments their schema requires.',
-  'If no tool is useful, just answer directly.',
-  'Never invent tools or results: if a call fails, say so.',
-  'Reply in the language the user writes in, and be concise.',
+  'You are a web navigation and interaction agent embedded in a Chrome extension side panel.',
+  'Your goal is to fulfill user requests by calling WebMCP tools exposed by the active web page and your native tools.',
+  'OPERATING RULES:',
+  '1. Tool Discovery & Chaining: Call available WebMCP tools to act on or query the page. Read input schemas carefully.',
+  '2. Asynchronous Processes & Waiting: If a tool call triggers a background process, returns an in-progress status (e.g. PENDING, RUNNING, IN_PROGRESS, QUEUED), or initiates page navigation, invoke the built-in "wait" tool to pause execution (5-15s). After waiting, re-query the status or use the updated page tools.',
+  '3. Dynamic Tool Set: Page tools update automatically as you navigate or as SPA views change. Re-evaluate available tools at each step.',
+  '4. Completion: Once a terminal state (SUCCESS, COMPLETED, FAILED) is reached, stop tool calls and summarize the final result clearly.',
+  'Never invent tools or results. Reply in the user\'s language and be concise.',
 ].join(' ');
+
+const NATIVE_WAIT_TOOL = {
+  type: 'function',
+  function: {
+    name: 'wait',
+    description: 'Pause execution for a specified duration in seconds (1 to 30s) to allow asynchronous page updates, SPA transitions, background tasks, or status changes to complete before re-inspecting page tools.',
+    parameters: {
+      type: 'object',
+      properties: {
+        seconds: {
+          type: 'number',
+          description: 'Number of seconds to wait (1 to 30). Default is 5.',
+        },
+      },
+      required: ['seconds'],
+    },
+  },
+};
 
 function describeHttpError(status, detail) {
   if (status === 403) return CORS_HINT;
@@ -1186,7 +1206,8 @@ async function runToolCall(call) {
     return { role: 'tool', tool_name: String(name || 'unknown'), content: ok ? output : 'Error: ' + output };
   };
 
-  if (!name || !state.tools.some((tool) => tool.name === name)) {
+  const isBuiltinWait = name === 'wait';
+  if (!name || (!isBuiltinWait && !state.tools.some((tool) => tool.name === name))) {
     const text = 'The page exposes no tool named "' + String(name) + '".';
     card.fail(text);
     return finish(false, text);
@@ -1197,9 +1218,21 @@ async function runToolCall(call) {
     if (!approved) {
       const text = 'The user cancelled this tool call.';
       card.cancelled(text);
-      recordExecution({ tool: name, origin: 'chat', args, ok: false, output: text });
-      return { role: 'tool', tool_name: name, content: text };
+      recordExecution({ tool: name || 'wait', origin: 'chat', args, ok: false, output: text });
+      return { role: 'tool', tool_name: name || 'wait', content: text };
     }
+  }
+
+  if (isBuiltinWait) {
+    const sec = Math.min(Math.max(Number(args && args.seconds) || 5, 1), 30);
+    const started = performance.now();
+    await new Promise((resolve) => setTimeout(resolve, sec * 1000));
+    await detectPageTools();
+    const ms = performance.now() - started;
+    const text = `Waited ${sec} second(s) for page updates. Current page exposes ${state.tools.length} tool(s).`;
+    card.done(text);
+    recordExecution({ tool: 'wait', origin: 'chat', args, ok: true, output: text, ms });
+    return { role: 'tool', tool_name: 'wait', content: text };
   }
 
   const started = performance.now();
@@ -1220,9 +1253,11 @@ async function runToolCall(call) {
 }
 
 async function runAgent() {
-  const tools = state.tools.map(toOllamaTool);
-
   for (let step = 0; step < MAX_TOOL_STEPS; step++) {
+    await detectPageTools();
+    const tools = state.tools.map(toOllamaTool);
+    tools.unshift(NATIVE_WAIT_TOOL);
+
     const bubble = createAssistantBubble();
     let reply;
     try {

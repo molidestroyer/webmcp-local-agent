@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.6
+
+Add native `wait` tool, per-step tool re-inspection, and enhanced multi-step agent system prompt:
+- Provide built-in extension `wait({ seconds })` tool so models can pause for async page updates/background jobs (1 to 30s).
+- Re-inspect active page tools (`detectPageTools()`) at the start of *every* loop step in `runAgent()`, giving the model up-to-date tools as SPA views and routes change.
+- Update `SYSTEM_PROMPT` with guidelines for tool chaining, async monitoring loops, and multi-step web interaction.
+
 ## 0.5.5
 
 Fix SPA client-side navigation tool detection and stale tool cache:
