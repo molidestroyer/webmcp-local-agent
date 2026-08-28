@@ -154,6 +154,22 @@ to two seconds for a port **even when `executeScript` throws** — a failed inje
 nothing about a bridge already reconnecting. Removing that wait brings back "you have to
 press refresh after every tab switch".
 
+## Two kinds of tool, two lifetimes
+
+Script registrations land in the hook's `registry` via the wrapped
+`provideContext`/`registerTool` and **stay** there. Declarative ones exist only in the
+result of `getTools()` and are rediscovered on every listing. Whenever something breaks
+for one kind and not the other, that asymmetry is where to look:
+
+- The wrapped `provideContext()` clears only entries flagged `viaScript`. A plain
+  `registry.clear()` also destroys declarative tools, which nothing would put back until
+  the next listing.
+- `snapshot()` **reports** discovery failures in `errors` instead of catching and moving
+  on. A page whose `getTools()` throws otherwise looks identical to a page with no tools —
+  and, again, only the declarative ones seem to vanish.
+- `list` answers `{ tools, errors, discovered, formsInDom }`; `toolsFromListing()` still
+  accepts a bare array so a rescue-injected older hook keeps working.
+
 ## Gotchas
 
 - After reloading the extension you must **F5 the open tabs**; content scripts are not

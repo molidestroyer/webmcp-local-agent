@@ -97,6 +97,7 @@
         source,
       },
       execute: executorOf(tool),
+      viaScript: Boolean(options && options.viaScript),
       source,
     });
   }
@@ -120,8 +121,12 @@
       try {
         target.provideContext = function (config, ...rest) {
           try {
-            // provideContext() replaces the whole tool set.
-            registry.clear();
+            // provideContext() replaces the whole *script-registered* set.
+            // Wiping the map wholesale also removed declarative tools, which
+            // only ever come from getTools(), until the next listing.
+            for (const [name, item] of registry) {
+              if (item.viaScript) registry.delete(name);
+            }
             const tools = config && config.tools;
             if (Array.isArray(tools)) tools.forEach((tool) => remember(tool, label, { viaScript: true }));
             notifyToolsChanged();
@@ -237,9 +242,14 @@
 
   async function snapshot() {
     patchAll();
+    const errors = [];
+    let discovered = 0;
+
     for (const entry of contextObjects()) {
-      // If the page registered its tools before we could wrap the API, we can
-      // still read them when the implementation exposes them.
+      // Script registrations already sit in the registry, put there by the
+      // wrappers. Declaratively registered tools exist nowhere but here, so a
+      // failure in this loop makes them silently disappear while JavaScript
+      // ones carry on working — which is exactly how it looked from outside.
       for (const key of ['tools', 'getTools', 'listTools']) {
         try {
           let value = entry.obj[key];
@@ -248,11 +258,24 @@
           const list = Array.isArray(value)
             ? value
             : (value && Array.isArray(value.tools) ? value.tools : null);
-          if (list) list.forEach((tool) => remember(tool, entry.label, { keepExisting: true }));
-        } catch (_) { /* noop */ }
+          if (list) {
+            discovered += list.length;
+            list.forEach((tool) => remember(tool, entry.label, { keepExisting: true }));
+          }
+        } catch (err) {
+          errors.push(entry.label + '.' + key + ': ' + String((err && err.message) || err));
+        }
       }
     }
-    return [...registry.values()].map((entry) => entry.descriptor);
+
+    return {
+      tools: [...registry.values()].map((item) => item.descriptor),
+      // Reported, not swallowed: without this the panel cannot tell "this page
+      // has no declarative tools" from "asking for them threw".
+      errors,
+      discovered,
+      formsInDom: formSignature().split('|').filter(Boolean).length,
+    };
   }
 
   async function executeTool(name, args, origin) {

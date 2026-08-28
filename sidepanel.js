@@ -288,7 +288,13 @@ async function detectPageTools() {
   try {
     await currentTabId();
     const answer = state.tabId == null ? null : await bridge('list', null);
-    state.tools = answer && !answer.error && Array.isArray(answer.result) ? answer.result : [];
+    const failed = !answer || answer.error;
+    state.tools = failed ? [] : S.toolsFromListing(answer.result);
+
+    // A page whose getTools() throws looks identical to one with no tools,
+    // which is how declarative tools went missing without a word.
+    const problems = failed ? [] : S.listingErrors(answer.result);
+    if (problems.length) showStatus('Reading the page tools failed: ' + problems.join(' | '));
 
     renderToolsBadge(state.tabId == null ? 'no tab' : null);
     renderToolsList();
@@ -296,6 +302,21 @@ async function detectPageTools() {
   } finally {
     els.refreshTools.classList.remove('is-spinning');
   }
+}
+
+/**
+ * Inspects now and once more shortly after.
+ *
+ * Declarative tools are synthesized from the markup by the browser, and a tab
+ * that has just come to the front may not have them ready the instant it does.
+ * The second pass costs nothing and is the difference between seeing them and
+ * having to press F5.
+ */
+let recheckTimer = null;
+function detectPageToolsTwice() {
+  detectPageTools();
+  clearTimeout(recheckTimer);
+  recheckTimer = setTimeout(detectPageTools, 700);
 }
 
 function renderToolsBadge(text) {
@@ -1288,7 +1309,7 @@ els.confirmTools.addEventListener('change', () => {
   chrome.storage.local.set({ confirmTools: els.confirmTools.checked });
 });
 
-chrome.tabs.onActivated.addListener(() => detectPageTools());
+chrome.tabs.onActivated.addListener(() => detectPageToolsTwice());
 // Coming back to the panel after it was hidden: the active tab may have moved
 // on without us.
 document.addEventListener('visibilitychange', () => {
@@ -1310,7 +1331,7 @@ chrome.runtime.onMessage.addListener((message) => {
         && message.windowId !== state.windowId) {
       return; // another window's side panel owns that one
     }
-    detectPageTools();
+    detectPageToolsTwice();
   }
 });
 

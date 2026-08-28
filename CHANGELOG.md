@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.7
+
+Declaratively registered tools went missing when switching tabs, while
+JavaScript ones refreshed correctly. That asymmetry is the clue: script
+registrations live in the hook's registry, put there by the wrappers, whereas
+declarative tools exist nowhere but the result of `getTools()` and are
+rediscovered on every listing.
+
+**`provideContext()` was wiping them.** The wrapper called `registry.clear()`
+to honour "provideContext replaces the whole tool set", but that map also holds
+everything discovered through `getTools()`. On a page that registers a tool by
+script — an SPA doing it on a route change, say — every declarative tool
+vanished with it. Only script-registered entries are cleared now.
+
+**A failing `getTools()` was swallowed.** The discovery loop caught every
+exception and moved on, so a page whose `getTools()` threw looked exactly like
+a page with no tools, and only the declarative ones disappeared because the
+script ones were already in the registry. `list` now answers with
+`{ tools, errors, discovered, formsInDom }` and the panel shows the failure.
+
+The panel also inspects a second time 700 ms after a tab comes to the front: a
+tab that has just been activated may not have its declarative tools synthesized
+the instant it does.
+
 ## 0.4.6
 
 Tool icons were picked by regex over the whole name, in a badly ordered list.

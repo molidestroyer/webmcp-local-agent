@@ -29,6 +29,13 @@ chrome.runtime.onInstalled.addListener(enableSidePanelOnActionClick);
 
 // --- Toolbar badge ---------------------------------------------------------
 
+/** The hook answers `list` with { tools, errors }; older ones with a bare array. */
+function toolCount(result) {
+  if (Array.isArray(result)) return result.length;
+  if (result && Array.isArray(result.tools)) return result.tools.length;
+  return 0;
+}
+
 /** Per-tab badge, so switching tabs shows the right count with no extra work. */
 function setBadge(tabId, count) {
   chrome.action.setBadgeText({ tabId, text: count > 0 ? String(count) : '' }).catch(() => {});
@@ -41,7 +48,7 @@ function setBadge(tabId, count) {
 async function refreshBadge(tabId) {
   if (!ports.has(tabId)) return;
   const answer = await bridge(tabId, 'list', null);
-  if (answer && Array.isArray(answer.result)) setBadge(tabId, answer.result.length);
+  if (answer && !answer.error) setBadge(tabId, toolCount(answer.result));
 }
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -172,8 +179,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.type !== 'bridge') return undefined;
   bridge(message.tabId, message.action, message.payload).then((answer) => {
     // Every listing the panel asks for also keeps the badge honest.
-    if (message.action === 'list' && Array.isArray(answer.result)) {
-      setBadge(message.tabId, answer.result.length);
+    if (message.action === 'list' && !answer.error) {
+      setBadge(message.tabId, toolCount(answer.result));
     }
     sendResponse(answer);
   });
