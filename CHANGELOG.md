@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.1
+
+`executeTool` failed again with `Failed to parse input arguments`.
+
+Same cause as 0.4.4 — the implementation wants the arguments as a JSON string,
+not an object — but a different wording. The retry was anchored on the exact
+text seen back then, `Failed to parse input string as JSON`, so it never fired
+for this one and the object form's failure was reported as final.
+
+The gate now matches both phrasings while staying anchored on the platform
+complaining about parsing *input*, which it does before the tool runs. It is
+still not a catch-all: a tool that fails on its own merits is never replayed,
+and there is a test asserting a half-failed call runs exactly once.
+
+When neither form works, the error now names both attempts instead of showing
+one message twice — the pair is what identifies which form an implementation
+wants.
+
 ## 0.5.0
 
 Read the upstream inspector properly instead of guessing, and found two things

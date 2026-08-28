@@ -126,9 +126,12 @@ whether we were in place at `document_start`, so that case remains distinguishab
 ## executeTool argument form
 
 The spec says `executeTool(tool, optional object inputObject)`; the shipping
-implementation wants a **JSON string** and answers `Failed to parse input string as JSON`
-for an object (it stringifies to `"[object Object]"`). `callExecuteTool()` sends the
-object, then retries once with `JSON.stringify(args)` **only** on that exact message —
+implementation wants a **JSON string** and rejects an object (it stringifies to
+`"[object Object]"`). Two wordings seen so far: `Failed to parse input string as JSON` and
+`Failed to parse input arguments` — **match the shape of the message, not one literal**, or
+the next rephrasing breaks it again, which is exactly what happened in 0.5.0.
+`callExecuteTool()` sends the object, then retries once with `JSON.stringify(args)` **only**
+on a parse-the-input message —
 which the platform raises before the tool runs, so nothing executes twice. Every other
 rejection propagates untouched: never widen that regex into a generic retry, or a failing
 `createFeature` will create two features. The result is cached per context in a WeakMap.

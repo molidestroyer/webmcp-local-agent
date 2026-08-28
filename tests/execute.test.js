@@ -72,3 +72,50 @@ test('forgetArgumentStyle resets what was learned', async () => {
   await S.callExecuteTool(context, {}, { a: 2 });
   assert.strictEqual(context.calls.length, 2, 'probing starts over');
 });
+
+test('the retry also fires for the "input arguments" wording', async () => {
+  // Chrome has phrased this two ways; both are the platform rejecting the
+  // arguments before the tool runs.
+  const context = {
+    getTools: async () => [{ name: 't' }],
+    executeTool: async (tool, args) => {
+      if (typeof args !== 'string') {
+        throw new TypeError(
+          "Failed to execute 'executeTool' on 'ModelContext': Failed to parse input arguments."
+        );
+      }
+      return 'ok';
+    },
+  };
+  assert.strictEqual(await S.callExecuteTool(context, {}, { a: 1 }), 'ok');
+});
+
+test('when neither form works, both messages are reported', async () => {
+  const context = {
+    getTools: async () => [{ name: 't' }],
+    executeTool: async (tool, args) => {
+      throw new TypeError(typeof args === 'string'
+        ? 'Failed to parse input arguments: still no'
+        : 'Failed to parse input arguments');
+    },
+  };
+  await assert.rejects(
+    () => S.callExecuteTool(context, {}, { a: 1 }),
+    (err) => {
+      assert.match(err.message, /both argument forms/);
+      assert.match(err.message, /As an object:/);
+      assert.match(err.message, /As a JSON string: .*still no/);
+      return true;
+    }
+  );
+});
+
+test('a tool that rejects on its own merits is never replayed', async () => {
+  let calls = 0;
+  const context = {
+    getTools: async () => [{ name: 't' }],
+    executeTool: async () => { calls++; throw new Error('Missing required fields: triggerType'); },
+  };
+  await assert.rejects(() => S.callExecuteTool(context, {}, { a: 1 }), /Missing required/);
+  assert.strictEqual(calls, 1, 'a createFeature that half-failed must not run twice');
+});
