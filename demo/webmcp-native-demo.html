@@ -131,9 +131,17 @@ document.modelContext.registerTool({
     properties: {
       title: { type: 'string', description: 'Short feature name' },
       description: { type: 'string', description: 'What the feature should do' },
+      // Carries anyOf *and* enum, like the real schema: the inspector must
+      // list the four choices once, not eight times.
       triggerType: {
         type: 'string',
-        description: 'What motivated the feature',
+        description: 'What initiated the feature.',
+        anyOf: [
+          { type: 'string', const: 'MarketNeed', title: 'Market need' },
+          { type: 'string', const: 'ChangeRequest', title: 'Change request' },
+          { type: 'string', const: 'Defect', title: 'Defect' },
+          { type: 'string', const: 'AutomatedSource', title: 'Automated source' },
+        ],
         enum: ['MarketNeed', 'ChangeRequest', 'Defect', 'AutomatedSource'],
       },
       priority: { type: 'string', description: 'Business priority', enum: ['P1', 'P2', 'P3'] },
