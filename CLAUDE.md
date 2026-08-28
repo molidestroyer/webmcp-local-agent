@@ -35,7 +35,8 @@ Repo language is **English** — code, comments, UI strings, docs and commit mes
 | `content.js` | ISOLATED | Bridge. Opens `chrome.runtime.connect({name:'webmcp-bridge'})` **towards** the SW. |
 | `background.js` | SW | `tabId → Port` map, request/response routing with timeouts, `sidePanel.setPanelBehavior`, rescue injection via `scripting.executeScript`. |
 | `sidepanel.{html,css,js}` | panel | Four tabs (`#tab-chat`, `#tab-tools`, `#tab-execute`, `#tab-history`) over one shared `state`, plus the tool-calling loop against `/api/chat`. Fixed dark theme, no light mode. |
-| `demo/webmcp-demo.html` | — | Test page with a `navigator.modelContext` polyfill and 4 tools. |
+| `demo/` | — | Playground: `index.html` landing page, `webmcp-demo.html` (imperative, 4 tools) and `webmcp-native-demo.html` (native API shape, the `createFeature` reproduction). Published to GitHub Pages **and** shipped inside the zip from this one folder, so the two can never drift. |
+| `.github/workflows/pages.yml` | — | Deploys `demo/` to <https://molidestroyer.github.io/webmcp-local-agent/> on pushes that touch it. Needs Settings → Pages → Source = **GitHub Actions** (one-time, done by hand). |
 | `build.ps1` | — | Validates + packages into `dist/webmcp-local-agent-<version>.zip`. |
 | `.github/workflows/build.yml` | — | CI: runs `build.ps1` (pwsh is preinstalled on `ubuntu-latest`), uploads the artifact and publishes a release on `v*` tags. |
 

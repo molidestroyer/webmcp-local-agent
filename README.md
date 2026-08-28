@@ -104,13 +104,19 @@ does not), then creates the GitHub release with the zip attached.
 
 ## Usage
 
-Open a page that exposes WebMCP tools. If you have none at hand, two demos ship with the
-extension — drag either onto a Chrome tab:
+You need a page that exposes WebMCP tools.
 
-- `demo/webmcp-demo.html` — imperative registration (`provideContext`), a todo list.
-- `demo/webmcp-native-demo.html` — the **current native API shape**:
-  `document.modelContext`, `getTools()` returning `RegisteredTool` objects whose
-  `inputSchema` is a JSON string, and `executeTool(registeredTool, args)`.
+**Playground: <https://molidestroyer.github.io/webmcp-local-agent/>** — two demo pages, no
+setup. Served over HTTPS from a real origin, so unlike a local `file://` page they also
+exercise the origin matching the extension does when resolving a tool.
+
+- **Native API demo** — `document.modelContext`, `getTools()` returning `RegisteredTool`
+  objects whose `inputSchema` is a JSON string, `executeTool(registeredTool, args)`. Its
+  `createFeature` tool has four required inputs, two constrained by `enum` / `anyOf`.
+- **Imperative demo** — `navigator.modelContext.provideContext({ tools })`, a todo list.
+
+The same files ship inside the extension (`demo/`), so you can open them offline too.
+`demo/` is the single source for both — the workflow publishes that folder as-is.
 
 **The toolbar icon tells you when a page has tools** — a green badge with the count appears
 without opening anything. It is per-tab and clears on navigation.
@@ -125,8 +131,10 @@ and the Ollama model picker (persisted in `chrome.storage.local`). Below it, fou
 | ▶ **Execute** | Run a tool by hand, no model involved. Pick it from the chips, fill the generated form, hit `▶ Execute Tool`. |
 | 📜 **History** | Every execution — manual and model-driven — with timestamp, duration, arguments and output. Persisted across sessions, capped at 100 entries. |
 
-With the bundled demo you can try: *"add buy bread"*, *"what is still pending?"*,
-*"mark #1 as done"*, *"switch the page to dark mode"*.
+With the todo demo you can try: *"add buy bread"*, *"what is still pending?"*,
+*"mark #1 as done"*, *"switch the page to dark mode"*. With the native one, ask it to file
+a feature and check that it uses the declared constants (`ChangeRequest`, `P2`) rather than
+inventing its own.
 
 ### The Execute tab
 
