@@ -26,15 +26,14 @@
   const patchedObjects = new WeakSet();
 
   const isFn = (value) => typeof value === 'function';
+  const S = window.__WebMCPLocalAgentSchema;
 
-  function schemaOf(tool) {
-    return (
-      tool.inputSchema ||
-      tool.input_schema ||
-      tool.parameters ||
-      tool.params ||
-      { type: 'object', properties: {} }
-    );
+  function rawSchemaOf(tool) {
+    if (tool.inputSchema !== undefined) return tool.inputSchema;
+    if (tool.input_schema !== undefined) return tool.input_schema;
+    if (tool.parameters !== undefined) return tool.parameters;
+    if (tool.params !== undefined) return tool.params;
+    return null;
   }
 
   function executorOf(tool) {
@@ -48,12 +47,21 @@
     const keepExisting = Boolean(options && options.keepExisting);
     if (!tool || typeof tool !== 'object' || typeof tool.name !== 'string') return;
     if (keepExisting && registry.has(tool.name)) return;
+
+    // The native API serialises inputSchema to a JSON string; imperative
+    // registrations pass an object. Normalise here so nothing downstream has to
+    // care, and keep the parse failure instead of pretending the tool takes no
+    // input.
+    const normalized = S.safeNormalizeInputSchema(rawSchemaOf(tool));
+
     registry.set(tool.name, {
       descriptor: {
         name: tool.name,
         description: tool.description || tool.title || '',
-        inputSchema: schemaOf(tool),
+        inputSchema: normalized.schema,
+        schemaError: normalized.error,
         annotations: tool.annotations || null,
+        origin: typeof tool.origin === 'string' ? tool.origin : null,
         source,
       },
       execute: executorOf(tool),
@@ -134,6 +142,9 @@
         found.push({ obj, label });
       }
     };
+    // document.modelContext is where the current native API lives; the others
+    // are earlier drafts and polyfills still found in the wild.
+    try { push(document.modelContext, 'document.modelContext'); } catch (_) { /* noop */ }
     try { push(navigator.modelContext, 'navigator.modelContext'); } catch (_) { /* noop */ }
     try { push(window.modelContext, 'window.modelContext'); } catch (_) { /* noop */ }
     try { push(window.agent && window.agent.modelContext, 'window.agent.modelContext'); } catch (_) { /* noop */ }
@@ -177,10 +188,18 @@
     return [...registry.values()].map((entry) => entry.descriptor);
   }
 
-  async function executeTool(name, args) {
+  async function executeTool(name, args, origin) {
     const params = args && typeof args === 'object' ? args : {};
-    const entry = registry.get(name);
+    const contexts = contextObjects().map((entry) => entry.obj);
 
+    // Primary path: the current API takes the RegisteredTool object, not its
+    // name. That object is realm-bound, so it is looked up again right now
+    // rather than cached from discovery or sent across extension messaging.
+    const resolved = await S.resolveRegisteredTool(contexts, name, origin);
+    if (resolved) return resolved.context.executeTool(resolved.tool, params);
+
+    // Imperative registration: the page handed us the callback itself.
+    const entry = registry.get(name);
     if (entry && entry.execute) {
       // Implementations differ: some expect `execute(args)`, others
       // `execute({ name, arguments })`. Pass both shapes at once.
@@ -190,11 +209,18 @@
       return entry.execute(payload);
     }
 
-    for (const candidate of contextObjects()) {
-      if (isFn(candidate.obj.callTool)) return candidate.obj.callTool(name, params);
-      if (isFn(candidate.obj.executeTool)) return candidate.obj.executeTool(name, params);
+    // Older shapes, and only for contexts that do not implement the current
+    // one: calling these first and swallowing the resulting TypeError would
+    // hide real failures.
+    for (const context of contexts) {
+      if (S.supportsRegisteredToolApi(context)) continue;
+      if (isFn(context.callTool)) return context.callTool(name, params);
+      if (isFn(context.executeTool)) return context.executeTool(name, params);
     }
 
+    if (contexts.some(S.supportsRegisteredToolApi)) {
+      throw new Error('WebMCP tool "' + name + '" is no longer registered on this page.');
+    }
     throw new Error('The page exposes no tool named "' + name + '".');
   }
 
@@ -224,7 +250,7 @@
         reply(serializable(await snapshot()));
       } else if (data.action === 'execute') {
         const payload = data.payload || {};
-        reply(serializable(await executeTool(payload.name, payload.args)));
+        reply(serializable(await executeTool(payload.name, payload.args, payload.origin)));
       } else {
         reply(null, 'Unknown action: ' + String(data.action));
       }

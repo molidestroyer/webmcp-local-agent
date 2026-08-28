@@ -83,7 +83,7 @@ async function ensureInjected(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['page-hook.js'],
+      files: ['lib/webmcp-schema.js', 'page-hook.js'],
       world: 'MAIN',
     });
     await chrome.scripting.executeScript({

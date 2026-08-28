@@ -30,6 +30,7 @@ $include = @(
   'sidepanel.html',
   'sidepanel.css',
   'sidepanel.js',
+  'lib',
   'README.md',
   'LICENSE',
   'icons',
@@ -47,11 +48,18 @@ Write-Host "WebMCP Local Agent v$version" -ForegroundColor Cyan
 if (-not $SkipChecks) {
   $node = Get-Command node -ErrorAction SilentlyContinue
   if ($node) {
-    foreach ($file in @('background.js', 'content.js', 'page-hook.js', 'sidepanel.js')) {
+    foreach ($file in @('background.js', 'content.js', 'page-hook.js', 'sidepanel.js', 'lib/webmcp-schema.js')) {
       & node --check (Join-Path $root $file)
       if ($LASTEXITCODE -ne 0) { throw "Syntax error in $file" }
     }
     Write-Host "  js syntax ok" -ForegroundColor DarkGray
+
+    Push-Location $root
+    try {
+      & node --test
+      if ($LASTEXITCODE -ne 0) { throw "Unit tests failed" }
+    } finally { Pop-Location }
+    Write-Host "  unit tests ok" -ForegroundColor DarkGray
   } else {
     Write-Warning "node not found: skipping the syntax check."
   }

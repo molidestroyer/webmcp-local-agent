@@ -137,18 +137,21 @@ function renderMarkdown(container, text) {
   });
 }
 
-/** `checkInDate` / `check_in_date` -> ['check','in','date'] */
-function tokens(key) {
-  return String(key)
-    .replace(/[_-]+/g, ' ')
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean);
-}
+// Shared with the page hook and the tests: see lib/webmcp-schema.js.
+const S = globalThis.__WebMCPLocalAgentSchema;
+const tokens = S.tokens;
+const humanize = S.humanize;
 
-function humanize(key) {
-  return tokens(key).map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+/** Pretty-prints a JSON string result while keeping the raw value elsewhere. */
+function maybeParseJson(value) {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch (_) {
+    return value;
+  }
 }
 
 // --- Tabs ------------------------------------------------------------------
@@ -302,34 +305,35 @@ function renderToolsBadge(text) {
 
 // --- Schema reading --------------------------------------------------------
 
+/**
+ * The hook already normalises schemas, but the panel re-runs it: a descriptor
+ * that still carries a JSON string must never degrade into "No input needed".
+ */
 function schemaOf(tool) {
-  const schema = tool.inputSchema || tool.parameters;
-  return schema && typeof schema === 'object' && !Array.isArray(schema) ? schema : {};
+  return S.safeNormalizeInputSchema(tool.inputSchema !== undefined ? tool.inputSchema : tool.parameters).schema;
 }
 
-function propertyNames(schema) {
-  const props = schema.properties;
-  return props && typeof props === 'object' ? Object.keys(props) : [];
+function schemaErrorOf(tool) {
+  if (tool.schemaError) return tool.schemaError;
+  return S.safeNormalizeInputSchema(tool.inputSchema !== undefined ? tool.inputSchema : tool.parameters).error;
 }
 
-function requiredNames(schema) {
-  return Array.isArray(schema.required) ? schema.required : [];
-}
+const propertyNames = S.propertyNames;
+const requiredNames = S.requiredNames;
+const describeNeeds = S.describeNeeds;
 
 function propertyDef(schema, key) {
   return (schema.properties && schema.properties[key]) || {};
 }
 
-function describeNeeds(props, required) {
-  if (!props.length) return 'No input needed.';
-  const primary = (required.length ? required : props).map(humanize);
-  if (props.length === 1) return 'Needs: ' + primary[0] + '.';
-  // "and more" tracks the total, not just the sample: a tool with 2 required and
-  // 2 optional params still asks for 4 things.
-  const shown = primary.slice(0, 2);
-  const more = props.length > shown.length;
-  const sample = more ? shown.join(', ') + ' and more' : shown.join(' and ');
-  return 'Needs ' + props.length + ' details (like ' + sample + ').';
+function toolByName(name) {
+  return state.tools.find((tool) => tool.name === name) || null;
+}
+
+/** Executions always carry the origin so the hook can match the right tool. */
+function executeOnPage(name, args) {
+  const tool = toolByName(name);
+  return bridge('execute', { name, args, origin: tool ? tool.origin : null });
 }
 
 const TOOL_ICONS = [
@@ -415,8 +419,16 @@ function createToolListItem(tool) {
 
   const needs = makeSection('What it needs');
   const needsText = document.createElement('div');
-  needsText.className = 'tool-card__text';
-  needsText.textContent = describeNeeds(props, required);
+  const schemaError = schemaErrorOf(tool);
+  if (schemaError) {
+    // A broken schema is not the same as a tool without parameters, and saying
+    // "No input needed" here is what let the model invent its own arguments.
+    needsText.className = 'tool-card__text schema-error';
+    needsText.textContent = 'Could not read this tool’s input schema: ' + schemaError;
+  } else {
+    needsText.className = 'tool-card__text';
+    needsText.textContent = describeNeeds(props, required);
+  }
   needs.appendChild(needsText);
 
   inner.append(does, needs);
@@ -598,7 +610,14 @@ function renderExecForm() {
   const props = propertyNames(schema);
   const required = requiredNames(schema);
 
-  if (!props.length) {
+  const schemaError = schemaErrorOf(tool);
+  if (schemaError) {
+    const note = document.createElement('div');
+    note.className = 'schema-error';
+    note.textContent = 'Could not read this tool’s input schema: ' + schemaError
+      + ' Arguments below are whatever you type; the page may reject them.';
+    els.execForm.appendChild(note);
+  } else if (!props.length) {
     const note = document.createElement('div');
     note.className = 'pane__empty';
     note.textContent = 'This tool takes no parameters.';
@@ -748,7 +767,7 @@ async function executeSelectedTool() {
   els.execOutput.textContent = 'Running…';
 
   const started = performance.now();
-  const answer = await bridge('execute', { name: tool.name, args });
+  const answer = await executeOnPage(tool.name, args);
   const ms = performance.now() - started;
   const seconds = (ms / 1000).toFixed(2) + 's';
 
@@ -759,7 +778,7 @@ async function executeSelectedTool() {
 
   els.execStatus.className = 'chip ' + (ok ? 'chip--ok' : 'chip--err');
   els.execStatus.textContent = (ok ? '✔ Success · ' : '✖ Error · ') + seconds;
-  els.execOutput.textContent = ok ? pretty(answer.result) : output;
+  els.execOutput.textContent = ok ? pretty(maybeParseJson(answer.result)) : output;
 
   els.execRun.disabled = false;
   els.execRun.textContent = '▶ Execute Tool';
@@ -1011,12 +1030,15 @@ function normalizeSchema(schema) {
 }
 
 function toOllamaTool(tool) {
+  // Properties, required, enum and anyOf reach the model exactly as the page
+  // declared them: renaming anything here is what makes a model emit
+  // `trigger_type` for a `triggerType` property.
   return {
     type: 'function',
     function: {
       name: tool.name,
       description: tool.description || tool.name,
-      parameters: normalizeSchema(tool.inputSchema),
+      parameters: normalizeSchema(schemaOf(tool)),
     },
   };
 }
@@ -1142,7 +1164,7 @@ async function runToolCall(call) {
   }
 
   const started = performance.now();
-  const answer = await bridge('execute', { name, args });
+  const answer = await executeOnPage(name, args);
   const ms = performance.now() - started;
 
   if (!answer || answer.error) {

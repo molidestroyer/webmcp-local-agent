@@ -729,3 +729,12 @@ body {
 }
 
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.schema-error {
+  padding: 6px 8px;
+  border: 1px solid #4a2230;
+  border-radius: 7px;
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: 11.5px;
+}

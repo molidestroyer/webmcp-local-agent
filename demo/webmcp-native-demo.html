@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebMCP demo · native API (createFeature)</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    max-width: 680px; margin: 40px auto; padding: 0 20px;
+    background: #0f0f17; color: #e8e8f2;
+  }
+  h1 { font-size: 20px; }
+  code { font-family: ui-monospace, Consolas, monospace; background: #1c1c2e; padding: 1px 5px; border-radius: 4px; }
+  .card { border: 1px solid #262637; border-radius: 10px; padding: 14px 18px; margin-top: 18px; background: #171726; }
+  .muted { color: #8f8fa8; font-size: 13px; }
+  label { display: block; margin-top: 10px; font-size: 13px; color: #8f8fa8; }
+  input, select, textarea {
+    width: 100%; padding: 6px 8px; margin-top: 3px;
+    background: #0f0f17; color: #e8e8f2; border: 1px solid #262637; border-radius: 6px;
+    font: inherit; font-size: 13px;
+  }
+  li { font-size: 14px; }
+</style>
+</head>
+<body>
+  <h1>WebMCP demo · native API shape</h1>
+  <p class="muted">
+    Mirrors the <strong>current</strong> WebMCP API rather than the earlier drafts:
+    tools live on <code>document.modelContext</code>, <code>getTools()</code> returns
+    <code>RegisteredTool</code> objects whose <code>inputSchema</code> is a
+    <strong>JSON string</strong>, and <code>executeTool()</code> takes the tool
+    <em>object</em> — passing its name throws
+    <code>The provided value is not of type 'RegisteredTool'</code>.
+  </p>
+  <p class="muted">
+    Use it to check that the inspector shows <code>title</code>,
+    <code>description</code>, <code>triggerType</code> and <code>priority</code>
+    instead of "No input needed", and that the model sticks to the declared enums.
+  </p>
+
+  <div class="card">
+    <strong>Feature form</strong>
+    <label>Title <input id="f-title" type="text"></label>
+    <label>Description <textarea id="f-description" rows="2"></textarea></label>
+    <label>Trigger type
+      <select id="f-triggerType">
+        <option>MarketNeed</option><option>ChangeRequest</option>
+        <option>Defect</option><option>AutomatedSource</option>
+      </select>
+    </label>
+    <label>Priority
+      <select id="f-priority"><option>P1</option><option>P2</option><option>P3</option></select>
+    </label>
+  </div>
+
+  <div class="card">
+    <strong>Created features</strong>
+    <ul id="list"></ul>
+    <p class="muted" id="counter">none yet</p>
+  </div>
+
+<script>
+// --- Page state ------------------------------------------------------------
+const features = [];
+let nextId = 1;
+
+function render() {
+  const list = document.getElementById('list');
+  list.textContent = '';
+  for (const feature of features) {
+    const li = document.createElement('li');
+    li.textContent = '#' + feature.id + ' [' + feature.triggerType + '/' + feature.priority + '] ' + feature.title;
+    list.appendChild(li);
+  }
+  document.getElementById('counter').textContent = features.length
+    ? features.length + ' feature(s)'
+    : 'none yet';
+}
+render();
+
+// --- Native-shaped WebMCP surface ------------------------------------------
+// Only installed when the real API is absent, so a browser that ships WebMCP
+// keeps using its own implementation.
+if (!('modelContext' in document)) {
+  const registry = [];
+
+  document.modelContext = {
+    registerTool(definition) {
+      registry.push({
+        name: definition.name,
+        description: definition.description,
+        origin: location.origin,
+        // The real API hands this over serialized. That is the whole point of
+        // this demo.
+        inputSchema: JSON.stringify(definition.inputSchema),
+        __run: definition.run,
+      });
+    },
+    async getTools() {
+      // Fresh objects on every call, like a live registry.
+      return registry.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        origin: tool.origin,
+        inputSchema: tool.inputSchema,
+        __run: tool.__run,
+      }));
+    },
+    async executeTool(registeredTool, args) {
+      if (!registeredTool || typeof registeredTool !== 'object' || typeof registeredTool.__run !== 'function') {
+        throw new TypeError(
+          "Failed to execute 'executeTool' on 'ModelContext': "
+          + "The provided value is not of type 'RegisteredTool'."
+        );
+      }
+      return registeredTool.__run(args || {});
+    },
+  };
+}
+
+// --- The reproduction tool -------------------------------------------------
+document.modelContext.registerTool({
+  name: 'createFeature',
+  description: 'Creates a new feature in the backlog from a title, a description, '
+    + 'the trigger that motivated it and its priority.',
+  inputSchema: {
+    type: 'object',
+    required: ['title', 'description', 'triggerType', 'priority'],
+    properties: {
+      title: { type: 'string', description: 'Short feature name' },
+      description: { type: 'string', description: 'What the feature should do' },
+      triggerType: {
+        type: 'string',
+        description: 'What motivated the feature',
+        enum: ['MarketNeed', 'ChangeRequest', 'Defect', 'AutomatedSource'],
+      },
+      priority: { type: 'string', description: 'Business priority', enum: ['P1', 'P2', 'P3'] },
+    },
+  },
+  run(args) {
+    const missing = ['title', 'description', 'triggerType', 'priority'].filter((key) => !args[key]);
+    if (missing.length) throw new Error('Missing required fields: ' + missing.join(', '));
+
+    const triggers = ['MarketNeed', 'ChangeRequest', 'Defect', 'AutomatedSource'];
+    if (!triggers.includes(args.triggerType)) {
+      throw new Error('triggerType must be one of ' + triggers.join(', ') + ', got "' + args.triggerType + '"');
+    }
+    if (!['P1', 'P2', 'P3'].includes(args.priority)) {
+      throw new Error('priority must be P1, P2 or P3, got "' + args.priority + '"');
+    }
+
+    // Fill the visible form, the way a declarative WebMCP form would.
+    document.getElementById('f-title').value = args.title;
+    document.getElementById('f-description').value = args.description;
+    document.getElementById('f-triggerType').value = args.triggerType;
+    document.getElementById('f-priority').value = args.priority;
+
+    const feature = { id: nextId++, ...args };
+    features.push(feature);
+    render();
+
+    // A JSON string result, like SubmitEvent.respondWith() often returns.
+    return JSON.stringify({ ok: true, id: feature.id, title: feature.title });
+  },
+});
+</script>
+</body>
+</html>

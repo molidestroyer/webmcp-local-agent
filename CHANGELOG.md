@@ -1,0 +1,83 @@
+# Changelog
+
+## 0.4.1
+
+Compatibility with the current native WebMCP API. Two independent bugs made
+declaratively registered tools unusable.
+
+### `document.modelContext` was never inspected
+
+The hook only looked at `navigator.modelContext`, `window.modelContext` and
+`window.agent`. The current API lives on `document.modelContext`, which is now
+checked first.
+
+### `inputSchema` arrives as a JSON string
+
+`RegisteredTool.inputSchema` is JSON-serialized. It was treated as an object,
+so it failed the type check and degraded into an empty schema — the inspector
+showed "No input needed" and the model, given no parameters, invented its own
+(`trigger_type: "User Story"` instead of `triggerType: "ChangeRequest"`).
+
+`normalizeInputSchema()` now parses strings and passes objects through
+untouched. Properties, `required`, `enum`, `anyOf`, titles and descriptions
+reach the model exactly as declared — nothing is renamed. A schema that cannot
+be parsed is reported as an error in the Tools and Execute tabs rather than
+silently becoming "No input needed".
+
+### `executeTool()` was called with a tool name
+
+The current API takes the `RegisteredTool` object:
+`executeTool(registeredTool, args)`. Passing a string throws
+`The provided value is not of type 'RegisteredTool'`.
+
+Execution now calls `getTools()` in the page immediately beforehand, matches on
+name plus `origin`, and hands over that exact object. RegisteredTool instances
+are realm-bound, so they are never cached in the panel nor sent through
+extension messaging. Tools removed or re-registered between discovery and
+execution are handled: a missing one reports
+`WebMCP tool "x" is no longer registered on this page.`
+
+Legacy `callTool(name, args)` shapes still work, but only for contexts that do
+not implement the current API — the RegisteredTool call is the primary path and
+its errors are never swallowed.
+
+### Also
+
+- Tool results that are JSON strings are pretty-printed in the Execute result
+  view while History keeps the raw value.
+- `lib/webmcp-schema.js` holds the shared pure logic, covered by 23 unit tests
+  (`node --test`), now run by `build.ps1` and by CI.
+- `demo/webmcp-native-demo.html` reproduces the `createFeature` case locally:
+  `document.modelContext`, a stringified schema, and an `executeTool` that
+  throws the real `TypeError` when handed a name.
+
+### Upgrade
+
+Reload the extension in `chrome://extensions` and **refresh the pages you had
+open** — content scripts are not re-injected into already-loaded tabs.
+
+## 0.4.0
+
+Tabbed side panel (Chat / Tools / Execute / History), per-tab toolbar badge with
+the tool count, manual execution with a schema-driven form and a live JSON
+editor, and a persistent execution history. Fixed dark theme.
+
+## 0.3.0
+
+Rich collapsible tool cards in the inspector: icon, humanised title, full
+description, plain-language summary of the required input, one pill per
+parameter and the registration source.
+
+## 0.2.1
+
+Fixed tool call cards collapsing to a 2px line: `.chat` is a flex column and its
+children were being shrunk instead of letting the container scroll.
+
+## 0.2.0
+
+Whole project translated to English. The Ollama `403` now explains itself
+instead of showing a bare status code.
+
+## 0.1.0
+
+First release: side panel with local Ollama chat and WebMCP tool calling.
