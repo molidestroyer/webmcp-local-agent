@@ -29,7 +29,9 @@ Repo language is **English** — code, comments, UI strings, docs and commit mes
 | File | World | Responsibility |
 | --- | --- | --- |
 | `manifest.json` | — | MV3. Permissions: `sidePanel`, `activeTab`, `scripting`, `storage`, `tabs`. Host permissions **only** towards `11434`. |
+| `lib/webmcp-schema.js` | MAIN + panel + node | Pure shared logic: schema normalization, RegisteredTool matching, naming helpers. Publishes `globalThis.__WebMCPLocalAgentSchema` **and** `module.exports`, so `node --test` covers it. Listed **before** `page-hook.js` in `content_scripts` and in `ensureInjected`. |
 | `page-hook.js` | MAIN | Wraps `provideContext` / `registerTool` / `unregisterTool` to track tools and keep the real reference to `execute`. Answers `list` and `execute` over `postMessage`. |
+| `tests/schema.test.js` | node | 23 tests, no dependencies. Run by `build.ps1` and CI before packaging. |
 | `content.js` | ISOLATED | Bridge. Opens `chrome.runtime.connect({name:'webmcp-bridge'})` **towards** the SW. |
 | `background.js` | SW | `tabId → Port` map, request/response routing with timeouts, `sidePanel.setPanelBehavior`, rescue injection via `scripting.executeScript`. |
 | `sidepanel.{html,css,js}` | panel | Four tabs (`#tab-chat`, `#tab-tools`, `#tab-execute`, `#tab-history`) over one shared `state`, plus the tool-calling loop against `/api/chat`. Fixed dark theme, no light mode. |
@@ -72,6 +74,27 @@ Repo language is **English** — code, comments, UI strings, docs and commit mes
   Execute rather than duplicating the form logic. Keep it that way.
 - `recordExecution()` is called from both the manual path and `runToolCall()`, so History
   covers manual and model-driven runs alike.
+
+## Native WebMCP API (the part that bit us)
+
+Three things about the **current** API, all fixed in 0.4.1 and all easy to regress:
+
+- The context object lives on **`document.modelContext`**. `navigator.modelContext` and
+  `window.modelContext` are earlier drafts; keep checking them, but `document` goes first.
+- **`RegisteredTool.inputSchema` is a JSON string.** Treating it as an object silently
+  produced an empty schema, so the inspector said "No input needed" and the model invented
+  arguments (`trigger_type: "User Story"` for a `triggerType` enum). `normalizeInputSchema`
+  parses strings; anything that is not a JSON object throws so the error is visible.
+  **Never let a schema failure fall back to "no parameters".**
+- **`executeTool(registeredTool, args)` takes the object, not the name.** A string throws
+  `The provided value is not of type 'RegisteredTool'`. The object is realm-bound: it
+  cannot be cached in the panel nor cross `postMessage`, so `resolveRegisteredTool()` calls
+  `getTools()` in the page immediately before each execution and matches on name + origin.
+  Legacy `callTool(name, args)` runs **only** for contexts without the current API — never
+  try the string form first and swallow its TypeError.
+
+`demo/webmcp-native-demo.html` reproduces all three locally (the `createFeature` case), and
+its fake `executeTool` throws the real TypeError when handed a name.
 
 ## Gotchas
 

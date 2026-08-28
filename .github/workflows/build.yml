@@ -35,6 +35,9 @@ jobs:
             exit 1
           fi
 
+      - name: Unit tests
+        run: node --test
+
       # build.ps1 is the single packaging path: local and CI run the same script.
       - name: Package
         shell: pwsh

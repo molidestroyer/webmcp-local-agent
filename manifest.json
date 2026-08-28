@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WebMCP Local Agent",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Chat with local Ollama and let it call the WebMCP tools exposed by the active page.",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "activeTab", "scripting", "storage", "tabs"],
@@ -32,7 +32,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["page-hook.js"],
+      "js": ["lib/webmcp-schema.js", "page-hook.js"],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": false

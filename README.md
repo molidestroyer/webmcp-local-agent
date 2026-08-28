@@ -104,8 +104,13 @@ does not), then creates the GitHub release with the zip attached.
 
 ## Usage
 
-Open a page that exposes WebMCP tools. If you have none at hand, use the bundled one:
-open `demo/webmcp-demo.html` in Chrome (drag the file onto a tab).
+Open a page that exposes WebMCP tools. If you have none at hand, two demos ship with the
+extension — drag either onto a Chrome tab:
+
+- `demo/webmcp-demo.html` — imperative registration (`provideContext`), a todo list.
+- `demo/webmcp-native-demo.html` — the **current native API shape**:
+  `document.modelContext`, `getTools()` returning `RegisteredTool` objects whose
+  `inputSchema` is a JSON string, and `executeTool(registeredTool, args)`.
 
 **The toolbar icon tells you when a page has tools** — a green badge with the count appears
 without opening anything. It is per-tab and clears on navigation.
@@ -159,11 +164,15 @@ sidepanel.js ──chrome.runtime──> background.js ──Port──> content
    └── fetch() ──> Ollama 127.0.0.1:11434                        navigator.modelContext ─┘
 ```
 
-- **`page-hook.js`** runs in the *MAIN world* at `document_start`. It wraps
+- **`page-hook.js`** runs in the *MAIN world* at `document_start`. It looks for the context
+  object on `document.modelContext` (the current API) and on `navigator.modelContext` /
+  `window.modelContext` / `window.agent` (earlier drafts and polyfills). It wraps
   `provideContext()`, `registerTool()` and `unregisterTool()` to track the live tools,
-  keeping the real reference to each `execute` function. If the page registered them
-  before we could hook in, it falls back to reading `tools` / `getTools()` / `listTools()`,
-  and uses `callTool()` to execute when available.
+  keeping the real reference to each `execute` function, and also reads `getTools()` for
+  tools registered before it could hook in.
+- **`lib/webmcp-schema.js`** holds the pure logic shared by the hook, the panel and the
+  tests: schema normalization and RegisteredTool resolution. See
+  [Native API compatibility](#native-api-compatibility).
 - **`content.js`** lives in the isolated world and opens a `Port` **towards** the service
   worker. That is why the extension **needs no host permissions over the pages you visit**:
   `tabs.sendMessage` is never used.
@@ -183,6 +192,40 @@ Streaming also surfaces the `thinking` block of reasoning models (qwen3, gemma w
 thinking) inside a collapsed disclosure.
 
 ---
+
+## Native API compatibility
+
+The WebMCP surface has moved, and two details of the current one are easy to get wrong.
+Both are handled in `lib/webmcp-schema.js` and covered by unit tests.
+
+**`inputSchema` is a JSON string.** `RegisteredTool.inputSchema` arrives serialized, not as
+an object. Treating it as an object makes it fail a type check and collapse into an empty
+schema — the inspector then says "No input needed" and the model, given no parameters,
+invents its own. `normalizeInputSchema()` parses strings, passes objects through by
+reference, and throws on anything that is not a JSON object so a broken schema surfaces as
+an error instead of masquerading as a parameterless tool. Properties, `required`, `enum`,
+`anyOf`, titles and descriptions reach the model exactly as declared.
+
+**`executeTool()` takes the tool object, not its name.** The call is
+`executeTool(registeredTool, args)`; passing a string throws
+`The provided value is not of type 'RegisteredTool'`. A `RegisteredTool` is bound to the
+page's realm, so it can be neither cached in the panel nor sent through extension
+messaging. The hook therefore calls `getTools()` in the page immediately before every
+execution, matches on name plus `origin`, and passes back that exact object. If the tool
+was removed or re-registered in between you get
+`WebMCP tool "x" is no longer registered on this page.`
+
+Older `callTool(name, args)` shapes still work, but only on contexts that do not implement
+the current API — the RegisteredTool path is primary and its errors are never swallowed.
+
+## Tests
+
+```bash
+node --test
+```
+
+No dependencies: `node:test` against `lib/webmcp-schema.js`. `build.ps1` and CI both run
+the suite before packaging, so a failing test blocks the zip.
 
 ## Security notes
 
