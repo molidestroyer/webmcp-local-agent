@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.5
+
+Fix SPA client-side navigation tool detection and stale tool cache:
+- Patch `history.pushState` and `history.replaceState` and listen to `popstate`/`hashchange` so tool changes trigger automatically on SPA route changes.
+- Automatically purge unmounted `<form toolname="...">` declarative tools from `registry` when `snapshot()` is called or when Refresh is clicked.
+
 ## 0.5.4
 
 Fix `Failed to parse input arguments` error in native WebMCP tool execution:

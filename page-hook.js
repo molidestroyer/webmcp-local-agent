@@ -305,6 +305,27 @@
   function patchAll() {
     for (const entry of contextObjects()) patch(entry.obj, entry.label);
     listenEverywhere();
+    patchHistory();
+  }
+
+  function patchHistory() {
+    if (window.history && !patchedObjects.has(window.history)) {
+      patchedObjects.add(window.history);
+      for (const method of ['pushState', 'replaceState']) {
+        if (isFn(window.history[method])) {
+          const original = window.history[method].bind(window.history);
+          try {
+            window.history[method] = function (...args) {
+              const res = original(...args);
+              notifyToolsChanged();
+              return res;
+            };
+          } catch (_) { /* noop */ }
+        }
+      }
+    }
+    try { window.addEventListener('popstate', notifyToolsChanged); } catch (_) { /* noop */ }
+    try { window.addEventListener('hashchange', notifyToolsChanged); } catch (_) { /* noop */ }
   }
 
   // The platform announces every registration and unregistration with a
@@ -385,6 +406,16 @@
 
   async function snapshot(options) {
     patchAll();
+
+    // Clean up stale declarative form tools whose <form toolname="..."> is no longer in the DOM
+    for (const [name, item] of registry) {
+      if (item.source === 'form[toolname]' || item.descriptor.registration === 'declarative') {
+        if (!findDeclarativeForm(name)) {
+          registry.delete(name);
+        }
+      }
+    }
+
     const fromOrigins = options && Array.isArray(options.fromOrigins) && options.fromOrigins.length
       ? options.fromOrigins
       : null;
