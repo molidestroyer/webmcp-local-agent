@@ -191,11 +191,41 @@
 
   function patchAll() {
     for (const entry of contextObjects()) patch(entry.obj, entry.label);
+    listenEverywhere();
   }
 
-  // Declarative tools are markup: they appear and disappear with client-side
-  // navigation, and nothing calls provideContext()/registerTool() for them, so
-  // the wrappers above never fire. Watch the document instead.
+  // The platform announces every registration and unregistration with a
+  // `toolchange` event. The spec fires it at the document's relevant global
+  // object and puts an `ontoolchange` handler on ModelContext, so listen in
+  // both places plus the context objects themselves — whichever exists wins.
+  //
+  // This is the signal that covers declaratively registered tools: nothing
+  // calls provideContext()/registerTool() for a <form toolname>, so the
+  // wrappers above never see them, and the browser is the only thing that
+  // knows when the markup produced or destroyed a tool.
+  const toolChangeTargets = new WeakSet();
+
+  function onToolChange() {
+    notifyToolsChanged();
+  }
+
+  function listenForToolChange(target) {
+    if (!target || toolChangeTargets.has(target)) return;
+    if (typeof target.addEventListener !== 'function') return;
+    toolChangeTargets.add(target);
+    try {
+      target.addEventListener('toolchange', onToolChange);
+    } catch (_) { /* noop */ }
+  }
+
+  function listenEverywhere() {
+    try { listenForToolChange(window); } catch (_) { /* noop */ }
+    try { listenForToolChange(document); } catch (_) { /* noop */ }
+    for (const entry of contextObjects()) listenForToolChange(entry.obj);
+  }
+
+  // A polyfilled page has no such event, and neither does a browser without
+  // WebMCP, so the DOM watch below stays as the fallback for those.
   let lastFormSignature = '';
   let formCheckTimer = null;
 
@@ -240,8 +270,11 @@
 
   // --- Discovery and execution --------------------------------------------
 
-  async function snapshot() {
+  async function snapshot(options) {
     patchAll();
+    const fromOrigins = options && Array.isArray(options.fromOrigins) && options.fromOrigins.length
+      ? options.fromOrigins
+      : null;
     const errors = [];
     let discovered = 0;
 
@@ -254,7 +287,16 @@
         try {
           let value = entry.obj[key];
           if (value === undefined) continue;
-          value = isFn(value) ? await value.call(entry.obj) : await value;
+          if (isFn(value)) {
+            // getTools() answers only for its own document unless the origins
+            // of the other frames are named. Older shapes take no argument, so
+            // fall back rather than lose the whole listing.
+            value = fromOrigins && key === 'getTools'
+              ? await value.call(entry.obj, { fromOrigins }).catch(() => value.call(entry.obj))
+              : await value.call(entry.obj);
+          } else {
+            value = await value;
+          }
           const list = Array.isArray(value)
             ? value
             : (value && Array.isArray(value.tools) ? value.tools : null);
@@ -337,7 +379,7 @@
 
     try {
       if (data.action === 'list') {
-        reply(serializable(await snapshot()));
+        reply(serializable(await snapshot(data.payload)));
       } else if (data.action === 'execute') {
         const payload = data.payload || {};
         reply(serializable(await executeTool(payload.name, payload.args, payload.origin)));

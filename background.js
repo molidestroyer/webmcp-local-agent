@@ -138,9 +138,39 @@ async function ensureInjected(tabId) {
   return ports.has(tabId);
 }
 
+/**
+ * Every distinct origin loaded in the tab, subframes included.
+ *
+ * getTools() with no options only reports the tools of the document it is
+ * asked on. Tools registered inside an iframe — which is where a lot of app
+ * shells put their forms — need their origin listed explicitly in
+ * `fromOrigins`, so gather them all and let the page filter.
+ */
+async function frameOrigins(tabId) {
+  try {
+    const frames = await chrome.webNavigation.getAllFrames({ tabId });
+    const origins = (frames || [])
+      .map((frame) => {
+        try {
+          return new URL(frame.url).origin;
+        } catch (_) {
+          return null;
+        }
+      })
+      .filter((origin) => origin && origin !== 'null');
+    return [...new Set(origins)];
+  } catch (_) {
+    return [];
+  }
+}
+
 async function bridge(tabId, action, payload) {
   if (typeof tabId !== 'number') {
     return { result: null, error: 'There is no active tab.' };
+  }
+
+  if (action === 'list' && !(payload && payload.fromOrigins)) {
+    payload = Object.assign({}, payload, { fromOrigins: await frameOrigins(tabId) });
   }
 
   if (!ports.has(tabId)) await ensureInjected(tabId);

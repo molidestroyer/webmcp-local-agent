@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.5.0
+
+Read the upstream inspector properly instead of guessing, and found two things
+it does that this extension did not.
+
+### The platform announces tool changes and nobody was listening
+
+`ModelContext` has an `ontoolchange` handler and fires a `toolchange` event at
+the document's global object whenever a tool is registered or unregistered. The
+inspector listens to it, which is why it reacts instantly.
+
+This extension had a throttled `MutationObserver` watching `form[toolname]`
+instead — a worse reimplementation of a signal the browser already sends, and
+one that misses any change the DOM does not reveal. The event is now handled on
+the context object, the document and the window; the observer stays as the
+fallback for polyfilled pages and browsers without WebMCP.
+
+### getTools() only answers for its own document
+
+`getTools()` takes `ModelContextGetToolOptions`, whose `fromOrigins` names the
+other documents to query. Called bare, as it was here, it returns nothing
+registered inside a subframe. The inspector collects every frame origin with
+`chrome.webNavigation.getAllFrames()` and passes them.
+
+The service worker now does the same and hands the origins to the hook, which
+falls back to a bare `getTools()` if an implementation rejects the argument.
+This needs the `webNavigation` permission and `<all_urls>` host access —
+the latter changes nothing in practice, since the content scripts already
+matched `<all_urls>`.
+
+### page-hook.js is now tested
+
+Every bug of the last few releases landed in the one file with no coverage,
+because it runs in a page's MAIN world. It needs only a handful of DOM surfaces,
+so a shim plus `node:vm` now exercises the real file: discovery, `fromOrigins`,
+`toolchange`, declarative labelling, the registry surviving `provideContext()`,
+reported errors and the execution path. 71 tests.
+
 ## 0.4.7
 
 Declaratively registered tools went missing when switching tabs, while

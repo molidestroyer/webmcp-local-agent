@@ -154,6 +154,21 @@ to two seconds for a port **even when `executeScript` throws** — a failed inje
 nothing about a bridge already reconnecting. Removing that wait brings back "you have to
 press refresh after every tab switch".
 
+## Signals the platform gives you (use them, do not reinvent them)
+
+- **`toolchange`**. `ModelContext` has an `ontoolchange` handler and the event is fired at
+  the document's global object on every registration and unregistration. Listen on the
+  context object, the document and the window. A `MutationObserver` over `form[toolname]`
+  is a *fallback* for polyfilled pages, not the mechanism — treating it as the mechanism is
+  what made declarative tools need a manual refresh.
+- **`getTools({ fromOrigins })`**. Bare `getTools()` answers only for its own document, so
+  anything registered in a subframe is invisible. `background.js` collects the origins with
+  `chrome.webNavigation.getAllFrames()` and passes them down; the hook falls back to a bare
+  call if an implementation rejects the argument.
+
+Both were found by reading `beaufortfrancois/model-context-tool-inspector`, which does
+both. When something works there and not here, read their source before theorising.
+
 ## Two kinds of tool, two lifetimes
 
 Script registrations land in the hook's `registry` via the wrapped
