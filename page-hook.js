@@ -327,7 +327,7 @@
     // Primary path: the current API takes the RegisteredTool object, not its
     // name. That object is realm-bound, so it is looked up again right now
     // rather than cached from discovery or sent across extension messaging.
-    const resolved = await S.resolveRegisteredTool(contexts, name, origin);
+    const resolved = await S.resolveRegisteredTool(contexts, name, origin, window);
     if (resolved) return S.callExecuteTool(resolved.context, resolved.tool, params);
 
     // Imperative registration: the page handed us the callback itself.

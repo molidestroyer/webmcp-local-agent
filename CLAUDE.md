@@ -172,6 +172,18 @@ press refresh after every tab switch".
 Both were found by reading `beaufortfrancois/model-context-tool-inspector`, which does
 both. When something works there and not here, read their source before theorising.
 
+## Executing the right RegisteredTool
+
+`matchRegisteredTool()` prefers `tool.window === window`, the way the upstream inspector
+does. Listing asks `getTools({ fromOrigins })` so subframe tools appear, which means
+several same-named tools can come back from different documents; executing another
+document's tool is rejected in ways that read like an argument problem. **Execution calls
+`getTools()` bare** — listing spans frames, execution belongs to this document.
+
+`callExecuteTool()` tries both argument forms in turn, starting with whichever last
+worked, and never leaves a cached answer outside the retry: a learned form that later
+stops working must not become a dead end.
+
 ## Two kinds of tool, two lifetimes
 
 Script registrations land in the hook's `registry` via the wrapped

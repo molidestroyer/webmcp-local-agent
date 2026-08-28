@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.5.2
+
+`Failed to parse input arguments` again, and reading the upstream handler line
+by line showed two mistakes, neither of them the wording of the message.
+
+### The wrong RegisteredTool was being executed
+
+The inspector picks its tool with
+`tools.find((t) => t.name === name && t.window === window)`. This extension
+matched on name and origin only. That was harmless until 0.5.0 added
+`fromOrigins` to listing, at which point `getTools()` started returning
+same-named tools from other documents — and executing another document's
+RegisteredTool is rejected in ways that read like an argument problem.
+
+Execution now prefers the tool whose `window` is this one, and asks
+`getTools()` without `fromOrigins`: listing spans frames, execution belongs to
+the document it runs in.
+
+### A cached argument form became a dead end
+
+Once `callExecuteTool()` had learned that a page wanted a JSON string, that
+call sat outside the try/catch. When it later failed, the raw parse error
+propagated with no second attempt — which is exactly the bare message that kept
+coming back, rather than the "both forms" message 0.5.1 added.
+
+Both forms are now tried in turn, starting with whichever last worked, and the
+cache is cleared when neither does. A rejection that is not an argument-parsing
+complaint is still never replayed.
+
 ## 0.5.1
 
 `executeTool` failed again with `Failed to parse input arguments`.

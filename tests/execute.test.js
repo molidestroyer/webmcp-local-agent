@@ -103,8 +103,8 @@ test('when neither form works, both messages are reported', async () => {
     () => S.callExecuteTool(context, {}, { a: 1 }),
     (err) => {
       assert.match(err.message, /both argument forms/);
-      assert.match(err.message, /As an object:/);
-      assert.match(err.message, /As a JSON string: .*still no/);
+      assert.match(err.message, /as an object:/);
+      assert.match(err.message, /as a JSON string: .*still no/);
       return true;
     }
   );
@@ -118,4 +118,37 @@ test('a tool that rejects on its own merits is never replayed', async () => {
   };
   await assert.rejects(() => S.callExecuteTool(context, {}, { a: 1 }), /Missing required/);
   assert.strictEqual(calls, 1, 'a createFeature that half-failed must not run twice');
+});
+
+// --- Picking the right RegisteredTool -------------------------------------
+
+test('the tool belonging to this window wins over a same-named one elsewhere', () => {
+  const here = { name: 'createFeature', window: 'top', origin: 'https://app.test' };
+  const framed = { name: 'createFeature', window: 'iframe', origin: 'https://app.test' };
+  // Listing asks with fromOrigins, so getTools() can return both.
+  assert.strictEqual(S.matchRegisteredTool([framed, here], 'createFeature', null, 'top'), here);
+  assert.strictEqual(S.matchRegisteredTool([here, framed], 'createFeature', null, 'iframe'), framed);
+});
+
+test('without a window to match, origin still decides', () => {
+  const a = { name: 't', origin: 'https://a.test' };
+  const b = { name: 't', origin: 'https://b.test' };
+  assert.strictEqual(S.matchRegisteredTool([a, b], 't', 'https://b.test', null), b);
+});
+
+test('a cached form that later stops working is retried the other way', async () => {
+  let wantsString = true;
+  const context = {
+    getTools: async () => [{ name: 't' }],
+    executeTool: async (tool, args) => {
+      const isString = typeof args === 'string';
+      if (wantsString !== isString) throw new TypeError('Failed to parse input arguments');
+      return isString ? 'string-ok' : 'object-ok';
+    },
+  };
+
+  assert.strictEqual(await S.callExecuteTool(context, {}, { a: 1 }), 'string-ok');
+  // The page changes its mind; the cached answer must not become a dead end.
+  wantsString = false;
+  assert.strictEqual(await S.callExecuteTool(context, {}, { a: 1 }), 'object-ok');
 });
