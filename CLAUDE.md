@@ -68,6 +68,9 @@ Repo language is **English** — code, comments, UI strings, docs and commit mes
 - **Execute tab.** `controlFor()` picks the input type and `smartDefault()` prefills it.
   Name heuristics match **whole tokens**, never substrings: `/date/` on `update` would
   turn it into a date picker. `tokens()` splits camelCase/snake/kebab first.
+- **Same rule for `iconForTool()`**, which regressed exactly this way: `setPayload` read as
+  a payment, `cancelBooking` as a booking. Its list is ordered so the action beats the
+  subject, and the description is consulted only when the name matches nothing.
 - The live JSON editor and the form sync both ways behind a `syncingJson` guard to avoid
   a feedback loop. `execArguments()` prefers the JSON when it parses — it is what the user
   edited last — and falls back to reading the form.

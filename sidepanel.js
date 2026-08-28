@@ -337,27 +337,8 @@ function executeOnPage(name, args) {
   return bridge('execute', { name, args, origin: tool ? tool.origin : null });
 }
 
-const TOOL_ICONS = [
-  [/(book|reserve|schedul|appointment|slot|calendar|date)/, '📅'],
-  [/(cart|buy|order|checkout|purchas|pay)/, '🛒'],
-  [/(search|find|query|lookup)/, '🔍'],
-  [/(add|create|new|insert|append)/, '➕'],
-  [/(delete|remove|clear|cancel)/, '🗑'],
-  [/(list|todos|items|all|get|read|fetch|info)/, '📋'],
-  [/(update|edit|set|change|toggle)/, '✏️'],
-  [/(theme|color|style|dark|light)/, '🎨'],
-  [/(send|mail|message|notify|email)/, '✉️'],
-  [/(user|account|profile|login|auth)/, '👤'],
-  [/(nav|open|go|route|scroll|click)/, '🧭'],
-];
-
-function iconForTool(tool) {
-  const haystack = (tool.name + ' ' + (tool.description || '')).toLowerCase();
-  for (const [pattern, icon] of TOOL_ICONS) {
-    if (pattern.test(haystack)) return icon;
-  }
-  return '⚡';
-}
+// Name-based icon inference lives in lib/webmcp-schema.js, with its tests.
+const iconForTool = S.iconForTool;
 
 // --- Tools tab -------------------------------------------------------------
 

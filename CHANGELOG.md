@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.6
+
+Tool icons were picked by regex over the whole name, in a badly ordered list.
+
+`cancelBooking` matched `book` before `cancel` and came out as 📅 instead of 🗑.
+Substring matching also made `setPayload` a payment, `budgetSummary` a getter,
+`installPlugin` a listing and `recreateIndex` a creation — the same trap already
+documented for the Execute tab, where `/date/` turned `update` into a date
+picker, and not applied here.
+
+Matching is now on whole tokens, with naive plurals folded so `listTodos` still
+finds `todo`, and the list is ordered so the action decides before the subject.
+Travel tools get ✈️. The name is decisive; the description is consulted only
+when the name matches nothing, since prose mentions verbs the tool does not
+perform.
+
+The inference moved into `lib/webmcp-schema.js` and is covered by tests.
+
+For the record: the upstream inspector has no per-tool icons at all — no icon
+library, no heuristic. Its `styles.css` carries a chevron for `<select>` and a
+`▾` for collapsibles, and nothing else.
+
 ## 0.4.5
 
 The tool list still needed a manual refresh after switching tabs. 0.4.4 added
