@@ -270,7 +270,7 @@ test('callExecuteTool invokes tool.execute() directly if present on tool object'
   const tool = {
     name: 'directTool',
     execute: async (args) => {
-      executedWith = args;
+      executedWith = typeof args === 'string' ? JSON.parse(args) : args;
       return { success: true };
     },
   };
@@ -288,7 +288,7 @@ test('callExecuteTool falls back to context.executeTool(tool.name, args) if tool
         throw new TypeError("Failed to execute 'executeTool': The provided value is not of type 'RegisteredTool'.");
       }
       calledName = target;
-      calledArgs = args;
+      calledArgs = typeof args === 'string' ? JSON.parse(args) : args;
       return 'fallback_ok';
     },
   };

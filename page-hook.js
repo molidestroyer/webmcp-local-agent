@@ -294,6 +294,9 @@
     try { push(document.modelContext, 'document.modelContext'); } catch (_) { /* noop */ }
     try { push(navigator.modelContext, 'navigator.modelContext'); } catch (_) { /* noop */ }
     try { push(window.modelContext, 'window.modelContext'); } catch (_) { /* noop */ }
+    try { push(navigator.modelContextTesting, 'navigator.modelContextTesting'); } catch (_) { /* noop */ }
+    try { push(document.modelContextTesting, 'document.modelContextTesting'); } catch (_) { /* noop */ }
+    try { push(window.modelContextTesting, 'window.modelContextTesting'); } catch (_) { /* noop */ }
     try { push(window.agent && window.agent.modelContext, 'window.agent.modelContext'); } catch (_) { /* noop */ }
     try { push(window.agent, 'window.agent'); } catch (_) { /* noop */ }
     return found;
@@ -454,12 +457,22 @@
     // Imperative registration: the page handed us the callback itself.
     const entry = registry.get(name);
     if (entry && entry.execute) {
-      // Implementations differ: some expect `execute(args)`, others
-      // `execute({ name, arguments })`. Pass both shapes at once.
-      const payload = Object.assign({}, params);
-      if (!('arguments' in payload)) payload.arguments = params;
-      if (!('name' in payload)) payload.name = name;
-      return entry.execute(payload);
+      try {
+        return await entry.execute(params);
+      } catch (err1) {
+        try {
+          const payload = Object.assign({}, params);
+          if (!('arguments' in payload)) payload.arguments = params;
+          if (!('name' in payload)) payload.name = name;
+          return await entry.execute(payload);
+        } catch (err2) {
+          try {
+            return await entry.execute(JSON.stringify(params));
+          } catch (_) {
+            throw err1;
+          }
+        }
+      }
     }
 
     // Declarative form fallback in DOM
@@ -473,8 +486,12 @@
     // hide real failures.
     for (const context of contexts) {
       if (S.supportsRegisteredToolApi(context)) continue;
-      if (isFn(context.callTool)) return context.callTool(name, params);
-      if (isFn(context.executeTool)) return context.executeTool(name, params);
+      if (isFn(context.callTool)) {
+        try { return await context.callTool(name, params); } catch (_) { return await context.callTool(name, JSON.stringify(params)); }
+      }
+      if (isFn(context.executeTool)) {
+        try { return await context.executeTool(name, params); } catch (_) { return await context.executeTool(name, JSON.stringify(params)); }
+      }
     }
 
     if (contexts.some(S.supportsRegisteredToolApi)) {

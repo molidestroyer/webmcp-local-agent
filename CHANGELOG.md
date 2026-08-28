@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.4
+
+Fix `Failed to parse input arguments` error in native WebMCP tool execution:
+- Default `callExecuteTool` to try JSON string format first (`JSON.stringify(params)`), as shipping Chrome implementations (Chrome 146-151) expect JSON strings.
+- Add wrapped argument format fallbacks (`{ arguments: params }` and stringified wrapped formats).
+- Add support for `modelContextTesting` context objects (`navigator.modelContextTesting`, `document.modelContextTesting`, `window.modelContextTesting`).
+- Fall back gracefully to script registration callbacks (`entry.execute`) and DOM form submission when native context execution fails.
+
 ## 0.5.3
 
 Fix WebMCP tool discovery, input schema normalization and execution fallbacks:
