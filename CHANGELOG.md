@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.5
+
+The tool list still needed a manual refresh after switching tabs. 0.4.4 added
+the missing badge listeners but missed the actual cause.
+
+`ports` (tabId to bridge port) lives in the service worker's memory, so a worker
+restart empties it while the content scripts are still running. On the next tab
+switch the panel asked for the tools, the worker woke with an empty map,
+`ensureInjected()` tried `executeScript` without an `activeTab` grant for that
+tab, and **gave up the moment it threw** — reporting zero tools. About a second
+later the content scripts noticed their port had died and reconnected, which is
+why pressing refresh then worked.
+
+`ensureInjected()` now waits up to two seconds for a port whether or not the
+injection succeeded. A failed injection says nothing about whether the tab
+already has a bridge on its way back.
+
+The side panel also stopped polling `chrome.tabs` itself. The service worker
+pushes an `active-tab` message on `onActivated` and on `onUpdated` completing —
+the shape the upstream inspector uses — so the panel reacts when the bridge is
+actually reachable rather than a beat too early. Panels in other windows ignore
+the message by comparing `windowId`.
+
 ## 0.4.4
 
 Two failures reported against a real page, both confirmed against the upstream

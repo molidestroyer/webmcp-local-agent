@@ -143,6 +143,14 @@ Three signals, and all three are needed:
 
 The side panel also re-inspects on `visibilitychange`.
 
+**The panel does not watch `chrome.tabs` for activation.** The worker pushes an
+`active-tab` message instead, because `ports` lives in worker memory: a restart empties
+it while the content scripts keep running, so a panel that asks the instant the tab
+changes gets an empty map and reports zero tools. `ensureInjected()` therefore waits up
+to two seconds for a port **even when `executeScript` throws** — a failed injection says
+nothing about a bridge already reconnecting. Removing that wait brings back "you have to
+press refresh after every tab switch".
+
 ## Gotchas
 
 - After reloading the extension you must **F5 the open tabs**; content scripts are not

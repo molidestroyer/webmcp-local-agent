@@ -87,6 +87,7 @@ const state = {
   messages: [{ role: 'system', content: SYSTEM_PROMPT }],
   history: [],
   tabId: null,
+  windowId: null,
   busy: false,
   ollamaOk: false,
 };
@@ -1316,7 +1317,18 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (tabId === state.tabId && changeInfo.status === 'complete') detectPageTools();
 });
 chrome.runtime.onMessage.addListener((message) => {
-  if (message && message.type === 'tools-changed' && message.tabId === state.tabId) {
+  if (!message) return;
+  if (message.type === 'tools-changed' && message.tabId === state.tabId) {
+    detectPageTools();
+    return;
+  }
+  // The service worker tells us the front tab changed. It knows before we do,
+  // and by the time it says so its bridge to that tab is reachable.
+  if (message.type === 'active-tab') {
+    if (message.windowId != null && state.windowId != null
+        && message.windowId !== state.windowId) {
+      return; // another window's side panel owns that one
+    }
     detectPageTools();
   }
 });
@@ -1324,6 +1336,11 @@ chrome.runtime.onMessage.addListener((message) => {
 // --- Bootstrap -------------------------------------------------------------
 
 (async function init() {
+  try {
+    const window_ = await chrome.windows.getCurrent();
+    state.windowId = window_ ? window_.id : null;
+  } catch (_) { /* fall back to reacting to every window */ }
+
   const stored = await chrome.storage.local.get(['confirmTools', 'activeTab']);
   els.confirmTools.checked = Boolean(stored.confirmTools);
   setTab(stored.activeTab || 'chat');

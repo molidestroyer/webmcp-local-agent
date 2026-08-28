@@ -9,6 +9,9 @@ const BRIDGE_TIMEOUT_MS = 35000;
 const BADGE_COLOR = '#10B981';
 // The page registers its tools a moment after the bridge connects.
 const BADGE_SETTLE_MS = 800;
+// A worker restart wipes `ports`; the content scripts reconnect ~1s later.
+const PORT_WAIT_ATTEMPTS = 40;
+const PORT_WAIT_STEP_MS = 50;
 
 /** @type {Map<number, chrome.runtime.Port>} */
 const ports = new Map();
@@ -44,12 +47,28 @@ async function refreshBadge(tabId) {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   // A navigation invalidates whatever we knew about that tab.
   if (changeInfo.status === 'loading') setBadge(tabId, 0);
-  else if (changeInfo.status === 'complete') refreshBadge(tabId);
+  else if (changeInfo.status === 'complete') {
+    refreshBadge(tabId);
+    announceActiveTab(tabId, null);
+  }
 });
 
-// Switching tabs has to re-badge: the count is per tab, and the previous one
-// was only ever computed when that tab's bridge connected.
-chrome.tabs.onActivated.addListener(({ tabId }) => refreshBadge(tabId));
+/**
+ * Tells the side panel which tab is in front now.
+ *
+ * The panel used to watch chrome.tabs itself, which left it a beat behind: the
+ * worker may still be waking up and its port map still empty when the panel
+ * asks. Pushing from here — the same shape the upstream inspector uses — means
+ * the panel reacts once the bridge is actually reachable.
+ */
+function announceActiveTab(tabId, windowId) {
+  chrome.runtime.sendMessage({ type: 'active-tab', tabId, windowId }).catch(() => {});
+}
+
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  refreshBadge(tabId);
+  announceActiveTab(tabId, windowId);
+});
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'webmcp-bridge') return;
@@ -97,13 +116,17 @@ async function ensureInjected(tabId) {
       world: 'ISOLATED',
     });
   } catch (_) {
-    return false;
+    // No activeTab grant for this tab, or an unscriptable page. Failing here is
+    // NOT a reason to give up: this map lives in the service worker's memory,
+    // so a worker restart empties it while the content scripts are still alive.
+    // They notice their port died and reconnect about a second later, and
+    // waiting for that is the difference between "0 tools until you press
+    // refresh" and it just working.
   }
 
-  // The content script connects asynchronously after it runs.
-  for (let attempt = 0; attempt < 20; attempt++) {
+  for (let attempt = 0; attempt < PORT_WAIT_ATTEMPTS; attempt++) {
     if (ports.has(tabId)) return true;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, PORT_WAIT_STEP_MS));
   }
   return ports.has(tabId);
 }
