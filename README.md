@@ -218,6 +218,12 @@ was removed or re-registered in between you get
 Older `callTool(name, args)` shapes still work, but only on contexts that do not implement
 the current API — the RegisteredTool path is primary and its errors are never swallowed.
 
+The current API is detected by its shape (`getTools` + `executeTool`), as the spec offers
+no version to test. One known limit: an early experimental implementation exposing both
+methods while still expecting `executeTool(name, args)` would match and then fail. That is
+intentional — it fails loudly with the page's own error rather than being papered over by a
+retry that would hide real failures of the current API.
+
 ## Tests
 
 ```bash

@@ -93,6 +93,14 @@ Three things about the **current** API, all fixed in 0.4.1 and all easy to regre
   Legacy `callTool(name, args)` runs **only** for contexts without the current API — never
   try the string form first and swallow its TypeError.
 
+`supportsRegisteredToolApi()` detects the current API **by shape** (`getTools` +
+`executeTool`), since the spec exposes no version to test. Its known limit: an old
+experimental implementation exposing both methods but still expecting
+`executeTool(name, args)` matches and then fails. Left that way on purpose — sniffing
+harder means guessing at implementations nobody here can test, and retrying with the
+string form on error would re-introduce the swallowed-TypeError bug. Such a page fails
+loudly with its own error shown in the panel.
+
 `demo/webmcp-native-demo.html` reproduces all three locally (the `createFeature` case), and
 its fake `executeTool` throws the real TypeError when handed a name.
 
