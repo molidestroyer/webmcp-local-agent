@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.3
+
+Fix WebMCP tool discovery, input schema normalization and execution fallbacks:
+- Handle markdown fenced (` ```json `) and double-stringified `inputSchema` inputs.
+- Support direct `tool.execute()` (WebMCP IDL spec), `context.executeTool(tool)`, `context.executeTool(name)`, and `context.callTool(name)` invocation fallbacks.
+- Add DOM form scanner for `<form toolname="...">` elements so declarative tools are discovered even if native `getTools()` misses them, with form input populate & submit execution fallback.
+- Sanitize DOM `Node`/`Element` results during messaging serialization.
+- Strip markdown fencing and normalize LLM argument string outputs.
+
 ## 0.5.2
 
 `Failed to parse input arguments` again, and reading the upstream handler line
