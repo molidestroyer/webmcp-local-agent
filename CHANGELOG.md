@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.2
+
+Fix prompt suggestions startup state, require page tools, set catalog default to none, and translate UI to English:
+- Fix initial startup bug where `"Generando sugerencias..."` loading indicator appeared when starting with `autoSuggest: false`.
+- Enforce WebMCP tool presence: prompt suggestions container is strictly hidden on pages with 0 exposed tools.
+- Set default catalog source to `None` (`0 rules loaded`) instead of auto-loading sample catalog.
+- Added **Demo Sample Catalog** option in Settings for testing multi-country address book rules on demand.
+- Translated all Settings labels, toggle text, rules inspector, and sample rules to English per `CLAUDE.md`.
+
 ## 0.6.1
 
 Add Knowledge & Business Rule Catalog System with Local / Remote sources, Rules Inspector UI, and Multi-Country Demo:
