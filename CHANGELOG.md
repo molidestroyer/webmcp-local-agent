@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.4
+
+Fix the suggestions panel staying visible when it should be hidden, and log suggestion generation to History:
+- `.suggestions` and `.suggestions__loading` had `display: flex` at the same CSS specificity as the `[hidden]` user-agent rule, so the author rule won the cascade and the `hidden` attribute never actually hid them — the "Generating suggestions…" indicator and the empty suggestions bar stayed on screen regardless of the auto-suggest setting or whether there was anything to show. Same class of bug the `.composer[hidden]` guard already fixed once; added the matching guards here.
+- Every prompt-suggestion generation attempt (success, HTTP error, empty model reply, or fetch failure) is now recorded in the History tab under a `suggestion` origin, with timing, so a stuck or failing generation is as visible as a failed tool call. Superseded (aborted) attempts are not logged — they are not failures.
+
 ## 0.6.2
 
 Fix prompt suggestions startup state, require page tools, set catalog default to none, and translate UI to English:
