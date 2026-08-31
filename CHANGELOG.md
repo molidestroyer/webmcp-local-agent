@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.5
+
+Make suggestions actually follow the tool-discovery and conversation lifecycle, not just settle once at load:
+- After every chat turn finishes, suggestions regenerate automatically using the conversation so far — previously they were only computed on tool discovery/tab events and went stale for the rest of the session.
+- The Ollama prompt used to generate suggestions now includes the last few exchanges (when there is a conversation) so follow-ups are contextual instead of always re-suggesting generic starting actions; the Knowledge Catalog's `systemContext` keeps being layered in alongside it, unchanged.
+- Clearing the chat now re-offers the same starting suggestions a fresh page load would show, instead of leaving stale follow-ups from the cleared conversation on screen.
+- Logged suggestion attempts (History, `suggestion` origin, added in 0.6.4) now also record whether conversation and catalog context were used, for debugging.
+
 ## 0.6.4
 
 Fix the suggestions panel staying visible when it should be hidden, and log suggestion generation to History:
