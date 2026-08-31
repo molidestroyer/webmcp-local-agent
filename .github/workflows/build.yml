@@ -56,5 +56,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/*.zip \
             --title "$GITHUB_REF_NAME" \
-            --clobber \
             --notes "Download the zip, unzip it and load it on \`chrome://extensions\` with **Load unpacked** (Developer mode required). You need [Ollama](https://ollama.com) running locally with a model that supports \`tools\`, and \`OLLAMA_ORIGINS=chrome-extension://*\` set — see the README."
