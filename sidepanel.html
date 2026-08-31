@@ -129,13 +129,13 @@
     <section id="tab-settings" class="pane" role="tabpanel">
       <!-- Group 1: AI Prompt Suggestions -->
       <div class="setting-card">
-        <div class="field-label">AI Prompt Suggestions / Sugerencias IA</div>
-        <label class="setting-item" title="Genera sugerencias automáticas de preguntas según las herramientas detectadas">
+        <div class="field-label">AI Prompt Suggestions</div>
+        <label class="setting-item" title="Automatically generate prompt suggestions based on page tools and catalog rules">
           <input type="checkbox" id="auto-suggest-toggle">
           <div class="setting-item__text">
-            <span class="setting-item__title">Habilitar prompts sugeridos automáticos</span>
+            <span class="setting-item__title">Enable automatic prompt suggestions</span>
             <span class="setting-item__desc">
-              Genera sugerencias dinámicas con el modelo Ollama basándose en las herramientas detectadas y las reglas de negocio del catálogo activo.
+              Generates dynamic prompt suggestions using local Ollama based on active page tools and active business rules.
             </span>
           </div>
         </label>
@@ -143,16 +143,20 @@
 
       <!-- Group 2: Knowledge & Business Rules Catalog -->
       <div class="setting-card">
-        <div class="field-label">Knowledge & Prompt Catalog / Catálogo de Reglas</div>
+        <div class="field-label">Knowledge & Prompt Catalog</div>
 
         <div class="setting-group-mode">
           <label class="setting-radio">
-            <input type="radio" name="catalog-source" value="local" id="catalog-source-local" checked>
-            <span>Ejemplo Local Incorporado (Local Sample)</span>
+            <input type="radio" name="catalog-source" value="none" id="catalog-source-none" checked>
+            <span>None (No catalog loaded)</span>
+          </label>
+          <label class="setting-radio">
+            <input type="radio" name="catalog-source" value="demo" id="catalog-source-demo">
+            <span>Demo Sample Catalog (Built-in multi-country demo)</span>
           </label>
           <label class="setting-radio">
             <input type="radio" name="catalog-source" value="remote" id="catalog-source-remote">
-            <span>URL Remota (GitHub Raw / PAT / Enterprise)</span>
+            <span>Custom Remote URL (GitHub Raw / PAT / Enterprise)</span>
           </label>
         </div>
 
@@ -160,29 +164,29 @@
           <div class="tool-form__field">
             <label for="catalog-url">Catalog Source URL</label>
             <input type="url" id="catalog-url" placeholder="https://raw.githubusercontent.com/user/repo/main/catalog.json">
-            <span class="hint">Admite JSON raw público o endpoints privados (GitHub, GitLab, Azure DevOps).</span>
+            <span class="hint">Supports public raw JSON or private API endpoints (GitHub, GitLab, Azure DevOps).</span>
           </div>
 
           <div class="tool-form__field">
-            <label for="catalog-token">Auth Token / PAT (Opcional)</label>
-            <input type="password" id="catalog-token" placeholder="ghp_... o Bearer Token">
-            <span class="hint">Para repositorios privados o GitHub Enterprise (Bearer Header).</span>
+            <label for="catalog-token">Auth Token / PAT (Optional)</label>
+            <input type="password" id="catalog-token" placeholder="ghp_... or Bearer Token">
+            <span class="hint">For private repositories or GitHub Enterprise (Authorization header).</span>
           </div>
 
           <button id="catalog-sync-btn" class="btn-wide" type="button">🔄 Sync Catalog Now</button>
         </div>
 
         <div id="catalog-status" class="catalog-status">
-          <span id="catalog-status-badge" class="chip chip--ok">Catálogo Local Activo</span>
-          <span id="catalog-status-meta" class="hint">3 reglas de negocio cargadas</span>
+          <span id="catalog-status-badge" class="chip pill--muted">No Catalog Active</span>
+          <span id="catalog-status-meta" class="hint">0 rules loaded</span>
         </div>
       </div>
 
-      <!-- Group 3: Catalog Rules Inspector / Visualizador del Catálogo -->
+      <!-- Group 3: Catalog Rules Inspector -->
       <div class="setting-card">
         <div class="field-label field-label--row">
-          <span>Active Rules Inspector / Visualizador del Catálogo</span>
-          <span id="catalog-rules-count" class="hint">3 reglas</span>
+          <span>Active Rules Inspector</span>
+          <span id="catalog-rules-count" class="hint">0 rules</span>
         </div>
         <div id="catalog-rules-list" class="catalog-rules-list"></div>
       </div>

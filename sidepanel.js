@@ -77,7 +77,8 @@ const els = {
   suggestionsChips: document.getElementById('suggestions-chips'),
   // settings
   autoSuggestToggle: document.getElementById('auto-suggest-toggle'),
-  catalogSourceLocal: document.getElementById('catalog-source-local'),
+  catalogSourceNone: document.getElementById('catalog-source-none'),
+  catalogSourceDemo: document.getElementById('catalog-source-demo'),
   catalogSourceRemote: document.getElementById('catalog-source-remote'),
   catalogRemoteFields: document.getElementById('catalog-remote-fields'),
   catalogUrl: document.getElementById('catalog-url'),
@@ -129,7 +130,7 @@ const state = {
   suggesting: false,
   staticSuggestions: [],
   aiSuggestions: [],
-  catalogSourceMode: 'local',
+  catalogSourceMode: 'none',
   catalogUrl: '',
   catalogToken: '',
   catalogData: null,
@@ -336,17 +337,17 @@ function renderCatalogRulesInspector() {
   if (!els.catalogRulesList) return;
   els.catalogRulesList.textContent = '';
 
-  const catalog = state.catalogData || (C ? C.DEFAULT_LOCAL_CATALOG : null);
+  const catalog = state.catalogData || (C ? C.EMPTY_CATALOG : null);
   const rules = catalog && Array.isArray(catalog.rules) ? catalog.rules : [];
 
   if (els.catalogRulesCount) {
-    els.catalogRulesCount.textContent = rules.length === 1 ? '1 regla' : rules.length + ' reglas';
+    els.catalogRulesCount.textContent = rules.length === 1 ? '1 rule' : rules.length + ' rules';
   }
 
   if (!rules.length) {
     const empty = document.createElement('div');
     empty.className = 'pane__empty';
-    empty.textContent = 'No hay reglas cargadas en el catálogo.';
+    empty.textContent = 'No rules loaded in catalog.';
     els.catalogRulesList.appendChild(empty);
     return;
   }
@@ -357,7 +358,7 @@ function renderCatalogRulesInspector() {
 
     const title = document.createElement('div');
     title.className = 'rule-card__title';
-    title.textContent = `${rule.name || 'Sin nombre'} (${rule.id || 'sin-id'})`;
+    title.textContent = `${rule.name || 'Untitled rule'} (${rule.id || 'no-id'})`;
 
     const match = document.createElement('div');
     match.className = 'rule-card__match';
@@ -365,11 +366,11 @@ function renderCatalogRulesInspector() {
     const reqTools = rule.match && Array.isArray(rule.match.requiredTools) && rule.match.requiredTools.length
       ? `Tools: ${rule.match.requiredTools.join(', ')}`
       : '';
-    match.textContent = [urlPat, reqTools].filter(Boolean).join(' | ') || 'Sin criterio de filtro';
+    match.textContent = [urlPat, reqTools].filter(Boolean).join(' | ') || 'No filter criteria';
 
     const ctx = document.createElement('div');
     ctx.className = 'rule-card__ctx';
-    ctx.textContent = rule.systemContext || 'Sin reglas de negocio (systemContext)';
+    ctx.textContent = rule.systemContext || 'No business rules (systemContext)';
 
     card.append(title, match, ctx);
     els.catalogRulesList.appendChild(card);
@@ -378,27 +379,49 @@ function renderCatalogRulesInspector() {
 
 async function syncCatalog() {
   if (!C) return;
-  const isRemote = els.catalogSourceRemote && els.catalogSourceRemote.checked;
-  state.catalogSourceMode = isRemote ? 'remote' : 'local';
 
-  if (!isRemote) {
-    state.catalogData = C.DEFAULT_LOCAL_CATALOG;
+  let mode = 'none';
+  if (els.catalogSourceDemo && els.catalogSourceDemo.checked) mode = 'demo';
+  else if (els.catalogSourceRemote && els.catalogSourceRemote.checked) mode = 'remote';
+  state.catalogSourceMode = mode;
+
+  if (mode === 'none') {
+    state.catalogData = C.EMPTY_CATALOG;
     if (els.catalogStatusBadge) {
-      els.catalogStatusBadge.className = 'chip chip--ok';
-      els.catalogStatusBadge.textContent = 'Catálogo Local Activo';
+      els.catalogStatusBadge.className = 'chip pill--muted';
+      els.catalogStatusBadge.textContent = 'No Catalog Active';
     }
     if (els.catalogStatusMeta) {
-      els.catalogStatusMeta.textContent = `${C.DEFAULT_LOCAL_CATALOG.rules.length} reglas incorporadas`;
+      els.catalogStatusMeta.textContent = '0 rules loaded';
     }
     renderCatalogRulesInspector();
     await chrome.storage.local.set({
-      catalogSourceMode: 'local',
+      catalogSourceMode: 'none',
       webmcp_catalog_cache: state.catalogData,
     });
     detectPageTools();
     return;
   }
 
+  if (mode === 'demo') {
+    state.catalogData = C.DEMO_SAMPLE_CATALOG;
+    if (els.catalogStatusBadge) {
+      els.catalogStatusBadge.className = 'chip chip--ok';
+      els.catalogStatusBadge.textContent = 'Demo Catalog Active';
+    }
+    if (els.catalogStatusMeta) {
+      els.catalogStatusMeta.textContent = `${C.DEMO_SAMPLE_CATALOG.rules.length} sample rules loaded`;
+    }
+    renderCatalogRulesInspector();
+    await chrome.storage.local.set({
+      catalogSourceMode: 'demo',
+      webmcp_catalog_cache: state.catalogData,
+    });
+    detectPageTools();
+    return;
+  }
+
+  // Remote catalog sync
   const url = els.catalogUrl ? els.catalogUrl.value.trim() : '';
   const token = els.catalogToken ? els.catalogToken.value.trim() : '';
   state.catalogUrl = url;
@@ -407,15 +430,15 @@ async function syncCatalog() {
   if (!url) {
     if (els.catalogStatusBadge) {
       els.catalogStatusBadge.className = 'chip chip--err';
-      els.catalogStatusBadge.textContent = 'URL Requerida';
+      els.catalogStatusBadge.textContent = 'URL Required';
     }
-    if (els.catalogStatusMeta) els.catalogStatusMeta.textContent = 'Introduce la URL del catálogo JSON';
+    if (els.catalogStatusMeta) els.catalogStatusMeta.textContent = 'Enter a valid catalog JSON URL';
     return;
   }
 
   if (els.catalogSyncBtn) {
     els.catalogSyncBtn.disabled = true;
-    els.catalogSyncBtn.textContent = 'Sincronizando…';
+    els.catalogSyncBtn.textContent = 'Syncing…';
   }
 
   try {
@@ -423,7 +446,7 @@ async function syncCatalog() {
     if (!res.ok) {
       if (els.catalogStatusBadge) {
         els.catalogStatusBadge.className = 'chip chip--err';
-        els.catalogStatusBadge.textContent = 'Error de Sincronización';
+        els.catalogStatusBadge.textContent = 'Sync Error';
       }
       if (els.catalogStatusMeta) els.catalogStatusMeta.textContent = res.error;
       return;
@@ -433,11 +456,11 @@ async function syncCatalog() {
     const ruleCount = state.catalogData.rules.length;
     if (els.catalogStatusBadge) {
       els.catalogStatusBadge.className = 'chip chip--ok';
-      els.catalogStatusBadge.textContent = 'Catálogo Remoto Sincronizado';
+      els.catalogStatusBadge.textContent = 'Remote Catalog Synced';
     }
     if (els.catalogStatusMeta) {
       const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      els.catalogStatusMeta.textContent = `✔ Sincronizado a las ${nowStr} · ${ruleCount} reglas`;
+      els.catalogStatusMeta.textContent = `✔ Synced at ${nowStr} · ${ruleCount} rules`;
     }
 
     renderCatalogRulesInspector();
@@ -463,18 +486,29 @@ function clearSuggestions() {
   }
   state.suggesting = false;
   state.aiSuggestions = [];
-  renderSuggestions();
+  state.staticSuggestions = [];
+  if (els.suggestions) els.suggestions.hidden = true;
+  if (els.suggestionsLoading) els.suggestionsLoading.hidden = true;
+  if (els.suggestionsChips) els.suggestionsChips.textContent = '';
 }
 
 function renderSuggestions() {
   if (!els.suggestionsChips) return;
   els.suggestionsChips.textContent = '';
 
+  // If NO tools are present on active tab -> STRICTLY HIDE EVERYTHING
+  if (!state.tools || state.tools.length === 0) {
+    if (els.suggestions) els.suggestions.hidden = true;
+    if (els.suggestionsLoading) els.suggestionsLoading.hidden = true;
+    return;
+  }
+
   const hasStatic = state.staticSuggestions && state.staticSuggestions.length > 0;
   const hasAI = state.aiSuggestions && state.aiSuggestions.length > 0;
 
-  if (!hasStatic && !hasAI) {
+  if (!hasStatic && !hasAI && !state.suggesting) {
     if (els.suggestions) els.suggestions.hidden = true;
+    if (els.suggestionsLoading) els.suggestionsLoading.hidden = true;
     return;
   }
 
@@ -517,8 +551,10 @@ function renderSuggestions() {
 }
 
 async function generatePromptSuggestions() {
-  if (!state.autoSuggest || !state.ollamaOk || !state.model || !state.tools.length || state.busy) {
-    clearSuggestions();
+  if (!state.autoSuggest || !state.ollamaOk || !state.model || !state.tools || !state.tools.length || state.busy) {
+    state.suggesting = false;
+    state.aiSuggestions = [];
+    renderSuggestions();
     return;
   }
 
@@ -552,7 +588,9 @@ async function generatePromptSuggestions() {
     });
 
     if (!response.ok) {
-      clearSuggestions();
+      state.suggesting = false;
+      state.aiSuggestions = [];
+      renderSuggestions();
       return;
     }
 
@@ -576,7 +614,9 @@ async function generatePromptSuggestions() {
     }
 
     if (!Array.isArray(parsed) || !parsed.length) {
-      clearSuggestions();
+      state.suggesting = false;
+      state.aiSuggestions = [];
+      renderSuggestions();
       return;
     }
 
@@ -585,16 +625,12 @@ async function generatePromptSuggestions() {
       .map((item) => item.trim())
       .slice(0, 3);
 
-    if (!validSuggestions.length) {
-      clearSuggestions();
-      return;
-    }
-
     state.aiSuggestions = validSuggestions;
     renderSuggestions();
   } catch (err) {
     if (err && err.name === 'AbortError') return;
-    clearSuggestions();
+    state.aiSuggestions = [];
+    renderSuggestions();
   } finally {
     state.suggesting = false;
     if (els.suggestionsLoading) els.suggestionsLoading.hidden = true;
@@ -616,6 +652,15 @@ async function detectPageTools() {
     renderToolsList();
     renderPicker();
 
+    // If NO tools detected on active page -> clear and hide suggestions completely!
+    if (!state.tools || state.tools.length === 0) {
+      state.activeSystemContext = '';
+      state.staticSuggestions = [];
+      state.aiSuggestions = [];
+      clearSuggestions();
+      return;
+    }
+
     // Resolve context using active tab URL and active WebMCP tools
     const [activeTabObj] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
     const tabUrl = activeTabObj ? activeTabObj.url : '';
@@ -631,9 +676,9 @@ async function detectPageTools() {
 
     renderSuggestions();
 
-    if (state.autoSuggest && state.tools.length > 0 && state.ollamaOk && state.model && !state.busy) {
+    if (state.autoSuggest && state.ollamaOk && state.model && !state.busy) {
       generatePromptSuggestions();
-    } else if (!state.autoSuggest) {
+    } else {
       state.aiSuggestions = [];
       renderSuggestions();
     }
@@ -1667,13 +1712,14 @@ if (els.autoSuggestToggle) {
   });
 }
 
-if (els.catalogSourceLocal && els.catalogSourceRemote) {
+if (els.catalogSourceNone && els.catalogSourceDemo && els.catalogSourceRemote) {
   const toggleSourceFields = () => {
     const isRemote = els.catalogSourceRemote.checked;
     if (els.catalogRemoteFields) els.catalogRemoteFields.hidden = !isRemote;
     syncCatalog();
   };
-  els.catalogSourceLocal.addEventListener('change', toggleSourceFields);
+  els.catalogSourceNone.addEventListener('change', toggleSourceFields);
+  els.catalogSourceDemo.addEventListener('change', toggleSourceFields);
   els.catalogSourceRemote.addEventListener('change', toggleSourceFields);
 }
 
@@ -1758,15 +1804,18 @@ chrome.runtime.onMessage.addListener((message) => {
   state.autoSuggest = Boolean(stored.autoSuggest);
   if (els.autoSuggestToggle) els.autoSuggestToggle.checked = state.autoSuggest;
 
-  state.catalogSourceMode = stored.catalogSourceMode || 'local';
+  state.catalogSourceMode = stored.catalogSourceMode || 'none';
   state.catalogUrl = stored.catalogUrl || '';
   state.catalogToken = stored.catalogToken || '';
 
   if (els.catalogSourceRemote && state.catalogSourceMode === 'remote') {
     els.catalogSourceRemote.checked = true;
     if (els.catalogRemoteFields) els.catalogRemoteFields.hidden = false;
-  } else if (els.catalogSourceLocal) {
-    els.catalogSourceLocal.checked = true;
+  } else if (els.catalogSourceDemo && state.catalogSourceMode === 'demo') {
+    els.catalogSourceDemo.checked = true;
+    if (els.catalogRemoteFields) els.catalogRemoteFields.hidden = true;
+  } else if (els.catalogSourceNone) {
+    els.catalogSourceNone.checked = true;
     if (els.catalogRemoteFields) els.catalogRemoteFields.hidden = true;
   }
 
@@ -1775,8 +1824,10 @@ chrome.runtime.onMessage.addListener((message) => {
 
   if (stored.webmcp_catalog_cache) {
     state.catalogData = stored.webmcp_catalog_cache;
+  } else if (state.catalogSourceMode === 'demo' && C) {
+    state.catalogData = C.DEMO_SAMPLE_CATALOG;
   } else if (C) {
-    state.catalogData = C.DEFAULT_LOCAL_CATALOG;
+    state.catalogData = C.EMPTY_CATALOG;
   }
 
   renderCatalogRulesInspector();
