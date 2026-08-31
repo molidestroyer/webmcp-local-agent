@@ -2001,8 +2001,8 @@ function renderCopilotStatus() {
 }
 
 async function checkCopilotStatus() {
-  const stored = await chrome.storage.local.get(['github_oauth_token']);
-  state.copilotConnected = Boolean(stored.github_oauth_token);
+  const stored = await chrome.storage.local.get(['github_oauth_token', 'copilot_session_token']);
+  state.copilotConnected = Boolean(stored.github_oauth_token && stored.copilot_session_token);
   renderCopilotStatus();
   renderModelOptions();
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.10
+
+Fix GitHub Copilot token exchange error handling and connection state verification:
+- Fallback header authorization check (`token <token>` vs `Bearer <token>`) during Copilot token exchange.
+- Avoid wiping local storage on token errors so clear diagnostic error messages (e.g. 403 Forbidden / missing Copilot subscription) are displayed directly in the Settings UI.
+- Verify both OAuth token and Copilot session token exist before declaring Connected state.
+
 ## 0.6.9
 
 Fix Copilot OAuth Client ID to valid public VS Code Copilot Client ID (`Iv1.b507a08c87ecfe98`):

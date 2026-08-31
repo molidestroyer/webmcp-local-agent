@@ -254,10 +254,45 @@ async function pollCopilotAuth(deviceCode) {
   }
   if (data.access_token) {
     await chrome.storage.local.set({ github_oauth_token: data.access_token });
-    const tokenInfo = await getOrRefreshCopilotToken(true);
-    return { status: 'success', access_token: data.access_token, tokenInfo };
+    try {
+      const tokenInfo = await getOrRefreshCopilotToken(true);
+      return { status: 'success', access_token: data.access_token, tokenInfo };
+    } catch (tokenErr) {
+      return { status: 'pending_or_error', error: 'copilot_subscription_error', error_description: tokenErr.message };
+    }
   }
   return { status: 'unknown', data };
+}
+
+async function fetchCopilotToken(oauthToken) {
+  let res = await fetch('https://api.github.com/copilot_internal/v2/token', {
+    method: 'GET',
+    headers: {
+      'Authorization': `token ${oauthToken}`,
+      'Editor-Version': 'vscode/1.96.2',
+      'Editor-Plugin-Version': 'copilot/1.250.0',
+      'User-Agent': 'GitHubCopilot/1.250.0',
+      'Accept': 'application/json',
+    },
+  });
+
+  if (!res.ok) {
+    const bearerRes = await fetch('https://api.github.com/copilot_internal/v2/token', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${oauthToken}`,
+        'Editor-Version': 'vscode/1.96.2',
+        'Editor-Plugin-Version': 'copilot/1.250.0',
+        'User-Agent': 'GitHubCopilot/1.250.0',
+        'Accept': 'application/json',
+      },
+    });
+    if (bearerRes.ok) {
+      res = bearerRes;
+    }
+  }
+
+  return res;
 }
 
 async function getOrRefreshCopilotToken(forceRefresh = false) {
@@ -276,24 +311,14 @@ async function getOrRefreshCopilotToken(forceRefresh = false) {
     };
   }
 
-  const res = await fetch('https://api.github.com/copilot_internal/v2/token', {
-    method: 'GET',
-    headers: {
-      'Authorization': `token ${oauthToken}`,
-      'Editor-Version': 'vscode/1.96.2',
-      'Editor-Plugin-Version': 'copilot/1.250.0',
-      'User-Agent': 'GitHubCopilot/1.250.0',
-      'Accept': 'application/json',
-    },
-  });
+  const res = await fetchCopilotToken(oauthToken);
 
   if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
-      await chrome.storage.local.remove(['github_oauth_token', 'copilot_session_token', 'copilot_token_expires_at', 'copilot_endpoints']);
-      throw new Error('GitHub OAuth token expired or invalid. Please re-authenticate GitHub Copilot.');
-    }
     const errText = await res.text().catch(() => '');
-    throw new Error(`Failed to exchange Copilot token: ${res.status} ${errText}`);
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`GitHub Copilot API error (${res.status}): ${errText || 'Access denied. Please verify your GitHub account has an active Copilot subscription.'}`);
+    }
+    throw new Error(`Failed to exchange Copilot token (${res.status}): ${errText}`);
   }
 
   const data = await res.json();
