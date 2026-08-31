@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.9
+
+Fix Copilot OAuth Client ID to valid public VS Code Copilot Client ID (`Iv1.b507a08c87ecfe98`):
+- Resolves HTTP 404 response on `POST https://github.com/login/device/code`. Device Flow authorization now connects cleanly.
+
 ## 0.6.8
 
 Add GitHub Copilot Device Flow Authentication & Unified Multi-Provider Model Architecture:
