@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+Add Settings tab and dynamic prompt suggestions based on WebMCP tools:
+- New Settings tab (`⚙️ Settings`) with toggle `"Habilitar prompts sugeridos automáticos"` (default: false).
+- Dynamic prompt generation using the selected Ollama model when WebMCP tools are detected on the active tab.
+- Quick reply chips above the chat composer with non-blocking spinner loading state.
+- AbortController cancellation management on tab switch, model change, or toggle change.
+
 ## 0.5.6
 
 Add native `wait` tool, per-step tool re-inspection, and enhanced multi-step agent system prompt:

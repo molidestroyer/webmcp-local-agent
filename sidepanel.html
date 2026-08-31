@@ -40,6 +40,7 @@
     <button class="tab" role="tab" type="button" data-tab="tools">🧰 Tools</button>
     <button class="tab" role="tab" type="button" data-tab="execute">▶ Execute</button>
     <button class="tab" role="tab" type="button" data-tab="history">📜 History</button>
+    <button class="tab" role="tab" type="button" data-tab="settings">⚙️ Settings</button>
   </nav>
 
   <main class="panes">
@@ -123,9 +124,32 @@
         show up here.
       </p>
     </section>
+
+    <!-- ------------------------------------------------------------ Settings -->
+    <section id="tab-settings" class="pane" role="tabpanel">
+      <div class="setting-card">
+        <div class="field-label">Suggestions / Sugerencias</div>
+        <label class="setting-item" title="Genera sugerencias automáticas de preguntas según las herramientas detectadas">
+          <input type="checkbox" id="auto-suggest-toggle">
+          <div class="setting-item__text">
+            <span class="setting-item__title">Habilitar prompts sugeridos automáticos</span>
+            <span class="setting-item__desc">
+              Genera de 1 a 3 sugerencias de preguntas basadas en las herramientas WebMCP detectadas en la página activa usando el modelo Ollama seleccionado.
+            </span>
+          </div>
+        </label>
+      </div>
+    </section>
   </main>
 
   <footer id="composer" class="composer">
+    <div id="suggestions" class="suggestions" hidden>
+      <div id="suggestions-loading" class="suggestions__loading" hidden>
+        <span class="is-spinning" aria-hidden="true">🔄</span>
+        <span>Generando sugerencias…</span>
+      </div>
+      <div id="suggestions-chips" class="suggestions__chips"></div>
+    </div>
     <label class="toggle" title="Ask for confirmation before running each page tool">
       <input type="checkbox" id="confirm-tools">
       <span>Confirm every tool</span>

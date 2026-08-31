@@ -12,7 +12,7 @@
 const OLLAMA_HOSTS = ['http://127.0.0.1:11434', 'http://localhost:11434'];
 const MAX_TOOL_STEPS = 6;
 const HISTORY_LIMIT = 100;
-const TABS = ['chat', 'tools', 'execute', 'history'];
+const TABS = ['chat', 'tools', 'execute', 'history', 'settings'];
 
 // Ollama answers 403 to any origin missing from OLLAMA_ORIGINS, and
 // chrome-extension:// is not allowed by default. Chrome does not attach an
@@ -72,6 +72,11 @@ const els = {
   send: document.getElementById('send'),
   clearChat: document.getElementById('clear-chat'),
   confirmTools: document.getElementById('confirm-tools'),
+  suggestions: document.getElementById('suggestions'),
+  suggestionsLoading: document.getElementById('suggestions-loading'),
+  suggestionsChips: document.getElementById('suggestions-chips'),
+  // settings
+  autoSuggestToggle: document.getElementById('auto-suggest-toggle'),
   // tools
   toolsList: document.getElementById('tools-list'),
   toolsEmpty: document.getElementById('tools-empty'),
@@ -110,6 +115,9 @@ const state = {
   windowId: null,
   busy: false,
   ollamaOk: false,
+  autoSuggest: false,
+  suggesting: false,
+  suggestions: [],
 };
 
 // --- Generic helpers -------------------------------------------------------
@@ -303,6 +311,131 @@ async function bridge(action, payload) {
   }
 }
 
+// --- Prompt suggestions ---------------------------------------------------
+
+let suggestAbortController = null;
+
+function clearSuggestions() {
+  if (suggestAbortController) {
+    suggestAbortController.abort();
+    suggestAbortController = null;
+  }
+  state.suggesting = false;
+  state.suggestions = [];
+  if (els.suggestions) {
+    els.suggestions.hidden = true;
+    if (els.suggestionsLoading) els.suggestionsLoading.hidden = true;
+    if (els.suggestionsChips) els.suggestionsChips.textContent = '';
+  }
+}
+
+function renderSuggestions() {
+  if (!els.suggestionsChips) return;
+  els.suggestionsChips.textContent = '';
+  if (!state.suggestions.length) {
+    if (els.suggestions) els.suggestions.hidden = true;
+    return;
+  }
+
+  if (els.suggestions) els.suggestions.hidden = false;
+  if (els.suggestionsLoading) els.suggestionsLoading.hidden = !state.suggesting;
+
+  for (const text of state.suggestions) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip-suggestion';
+    chip.textContent = '💡 ' + text;
+    chip.addEventListener('click', () => {
+      els.input.value = text;
+      autoGrow();
+      updateSendState();
+      sendMessage();
+    });
+    els.suggestionsChips.appendChild(chip);
+  }
+}
+
+async function generatePromptSuggestions() {
+  if (!state.autoSuggest || !state.ollamaOk || !state.model || !state.tools.length || state.busy) {
+    clearSuggestions();
+    return;
+  }
+
+  if (suggestAbortController) {
+    suggestAbortController.abort();
+  }
+  suggestAbortController = new AbortController();
+  const signal = suggestAbortController.signal;
+
+  state.suggesting = true;
+  if (els.suggestions) els.suggestions.hidden = false;
+  if (els.suggestionsLoading) els.suggestionsLoading.hidden = false;
+
+  const toolSummary = state.tools.map((t) => `- ${t.name}: ${t.description || 'No description'}`).join('\n');
+  const prompt = `Available page tools:\n${toolSummary}\n\nSuggest between 1 and 3 short, direct user questions or actions that can be requested using these tools. Output MUST be ONLY a JSON array of strings, e.g. ["Suggestion 1", "Suggestion 2"]. Do NOT include any markdown code blocks, explanation, or extra text.`;
+
+  try {
+    const response = await fetch(state.host + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: state.model,
+        messages: [{ role: 'user', content: prompt }],
+        stream: false,
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      clearSuggestions();
+      return;
+    }
+
+    const data = await response.json();
+    if (signal.aborted) return;
+
+    let content = (data.message && data.message.content) || '';
+    content = content.trim();
+    if (content.startsWith('```')) {
+      content = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    }
+
+    let parsed = [];
+    try {
+      parsed = JSON.parse(content);
+    } catch (_) {
+      const matches = content.match(/"([^"]+)"/g);
+      if (matches) {
+        parsed = matches.map((m) => m.replace(/^"|"$/g, '').trim());
+      }
+    }
+
+    if (!Array.isArray(parsed) || !parsed.length) {
+      clearSuggestions();
+      return;
+    }
+
+    const validSuggestions = parsed
+      .filter((item) => typeof item === 'string' && item.trim())
+      .map((item) => item.trim())
+      .slice(0, 3);
+
+    if (!validSuggestions.length) {
+      clearSuggestions();
+      return;
+    }
+
+    state.suggestions = validSuggestions;
+    renderSuggestions();
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+    clearSuggestions();
+  } finally {
+    state.suggesting = false;
+    if (els.suggestionsLoading) els.suggestionsLoading.hidden = true;
+  }
+}
+
 async function detectPageTools() {
   els.refreshTools.classList.add('is-spinning');
   try {
@@ -319,6 +452,12 @@ async function detectPageTools() {
     renderToolsBadge(state.tabId == null ? 'no tab' : null);
     renderToolsList();
     renderPicker();
+
+    if (state.autoSuggest && state.tools.length > 0 && state.ollamaOk && state.model && !state.busy) {
+      generatePromptSuggestions();
+    } else if (!state.tools.length || !state.autoSuggest) {
+      clearSuggestions();
+    }
   } finally {
     els.refreshTools.classList.remove('is-spinning');
   }
@@ -1286,6 +1425,7 @@ async function sendMessage() {
   const text = els.input.value.trim();
   if (!text || state.busy || !state.model) return;
 
+  clearSuggestions();
   state.busy = true;
   els.input.value = '';
   autoGrow();
@@ -1329,7 +1469,24 @@ els.modelSelect.addEventListener('change', () => {
   state.model = els.modelSelect.value;
   chrome.storage.local.set({ selectedModel: state.model });
   updateSendState();
+  if (state.autoSuggest && state.tools.length > 0) {
+    generatePromptSuggestions();
+  } else {
+    clearSuggestions();
+  }
 });
+
+if (els.autoSuggestToggle) {
+  els.autoSuggestToggle.addEventListener('change', () => {
+    state.autoSuggest = els.autoSuggestToggle.checked;
+    chrome.storage.local.set({ autoSuggest: state.autoSuggest });
+    if (state.autoSuggest && state.tools.length > 0) {
+      generatePromptSuggestions();
+    } else {
+      clearSuggestions();
+    }
+  });
+}
 
 els.refreshTools.addEventListener('click', detectPageTools);
 els.toolsBadge.addEventListener('click', () => setTab('tools'));
@@ -1394,8 +1551,10 @@ chrome.runtime.onMessage.addListener((message) => {
     state.windowId = window_ ? window_.id : null;
   } catch (_) { /* fall back to reacting to every window */ }
 
-  const stored = await chrome.storage.local.get(['confirmTools', 'activeTab']);
+  const stored = await chrome.storage.local.get(['confirmTools', 'activeTab', 'autoSuggest']);
   els.confirmTools.checked = Boolean(stored.confirmTools);
+  state.autoSuggest = Boolean(stored.autoSuggest);
+  if (els.autoSuggestToggle) els.autoSuggestToggle.checked = state.autoSuggest;
   setTab(stored.activeTab || 'chat');
 
   await loadHistory();
