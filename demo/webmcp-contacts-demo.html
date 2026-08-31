@@ -314,52 +314,59 @@
 
     // --- WebMCP Tool Registration -------------------------------------------
     const ctx = document.modelContext || navigator.modelContext || window.modelContext;
-    if (ctx && typeof ctx.provideContext === 'function') {
-      ctx.provideContext({
-        tools: [
-          {
-            name: 'create_contact',
-            description: 'Creates a new contact with country-specific tax ID and postal code validation.',
-            inputSchema: {
-              type: 'object',
-              required: ['fullName', 'country', 'taxId', 'postalCode'],
-              properties: {
-                fullName: { type: 'string', description: 'Full name of the contact' },
-                country: { type: 'string', enum: ['ZA', 'ES', 'CA'], description: 'Country code' },
-                taxId: { type: 'string', description: 'National ID, DNI/NIF, or SIN' },
-                postalCode: { type: 'string', description: 'Postal Code' },
-                address: { type: 'string', description: 'Street address' }
-              }
-            },
-            execute: createContact
-          },
-          {
-            name: 'search_contact',
-            description: 'Searches for contacts by name, tax ID, or country code.',
-            inputSchema: {
-              type: 'object',
-              required: ['query'],
-              properties: {
-                query: { type: 'string', description: 'Search term' }
-              }
-            },
-            execute: searchContact
-          },
-          {
-            name: 'validate_address',
-            description: 'Validates postal code and address formatting for South Africa (ZA), Spain (ES), or Canada (CA).',
-            inputSchema: {
-              type: 'object',
-              required: ['country', 'postalCode'],
-              properties: {
-                country: { type: 'string', enum: ['ZA', 'ES', 'CA'] },
-                postalCode: { type: 'string' }
-              }
-            },
-            execute: validateAddress
+    const contactTools = [
+      {
+        name: 'create_contact',
+        description: 'Creates a new contact with country-specific tax ID and postal code validation.',
+        inputSchema: {
+          type: 'object',
+          required: ['fullName', 'country', 'taxId', 'postalCode'],
+          properties: {
+            fullName: { type: 'string', description: 'Full name of the contact' },
+            country: { type: 'string', enum: ['ZA', 'ES', 'CA'], description: 'Country code' },
+            taxId: { type: 'string', description: 'National ID, DNI/NIF, or SIN' },
+            postalCode: { type: 'string', description: 'Postal Code' },
+            address: { type: 'string', description: 'Street address' }
           }
-        ]
-      });
+        },
+        execute: createContact
+      },
+      {
+        name: 'search_contact',
+        description: 'Searches for contacts by name, tax ID, or country code.',
+        inputSchema: {
+          type: 'object',
+          required: ['query'],
+          properties: {
+            query: { type: 'string', description: 'Search term' }
+          }
+        },
+        execute: searchContact
+      },
+      {
+        name: 'validate_address',
+        description: 'Validates postal code and address formatting for South Africa (ZA), Spain (ES), or Canada (CA).',
+        inputSchema: {
+          type: 'object',
+          required: ['country', 'postalCode'],
+          properties: {
+            country: { type: 'string', enum: ['ZA', 'ES', 'CA'] },
+            postalCode: { type: 'string' }
+          }
+        },
+        execute: validateAddress
+      }
+    ];
+
+    // The real native API only implements registerTool() (one call per tool);
+    // provideContext() is an older/draft bulk shape some polyfills still offer.
+    // Checking for provideContext alone (as this used to) reported "not
+    // available" on a browser whose real ModelContext only has registerTool.
+    if (ctx && typeof ctx.registerTool === 'function') {
+      contactTools.forEach((tool) => ctx.registerTool(tool));
+      log('Registered WebMCP tools: "create_contact", "search_contact", "validate_address"');
+    } else if (ctx && typeof ctx.provideContext === 'function') {
+      ctx.provideContext({ tools: contactTools });
       log('Registered WebMCP tools: "create_contact", "search_contact", "validate_address"');
     } else {
       log('WARNING: WebMCP modelContext not available. Reload the page after installing the extension.');

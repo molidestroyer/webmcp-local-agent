@@ -86,8 +86,7 @@ if (!('modelContext' in navigator)) {
 const text = (value) => ({ content: [{ type: 'text', text: value }] });
 
 // --- Tools -----------------------------------------------------------------
-navigator.modelContext.provideContext({
-  tools: [
+const tools = [
     {
       name: 'list-todos',
       description: 'Returns every todo in the list with its id and status.',
@@ -145,8 +144,16 @@ navigator.modelContext.provideContext({
         return text('Theme switched to ' + (dark ? 'dark' : 'light') + '.');
       },
     },
-  ],
-});
+];
+
+// The real native API only implements registerTool() (one call per tool);
+// provideContext() is an older/draft bulk shape some polyfills still offer.
+// Prefer registerTool() so this registers against the real API too.
+if (typeof navigator.modelContext.registerTool === 'function') {
+  tools.forEach((tool) => navigator.modelContext.registerTool(tool));
+} else if (typeof navigator.modelContext.provideContext === 'function') {
+  navigator.modelContext.provideContext({ tools });
+}
 </script>
 </body>
 </html>

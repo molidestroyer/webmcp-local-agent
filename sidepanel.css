@@ -701,6 +701,19 @@ body {
 
 .composer__row { display: flex; align-items: flex-end; gap: 6px; }
 
+/* Same footprint as .send-btn: both sit on the same row and should read as a
+   matched pair, not one full-size action next to a shrunk-to-content one. */
+.composer__row #clear-chat {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 #input {
   flex: 1 1 auto;
   min-height: 36px;

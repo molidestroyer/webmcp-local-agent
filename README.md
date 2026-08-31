@@ -106,15 +106,23 @@ does not), then creates the GitHub release with the zip attached.
 
 You need a page that exposes WebMCP tools.
 
-**Playground: <https://molidestroyer.github.io/webmcp-local-agent/>** — three demo pages, no
+**Playground: <https://molidestroyer.github.io/webmcp-local-agent/>** — four demo pages, no
 setup. Served over HTTPS from a real origin, so unlike a local `file://` page they also
 exercise the origin matching the extension does when resolving a tool.
 
-- **Native API demo** — `document.modelContext`, `getTools()` returning `RegisteredTool`
-  objects whose `inputSchema` is a JSON string, `executeTool(registeredTool, args)`. Its
-  `createFeature` tool has four required inputs, two constrained by `enum` / `anyOf`.
-- **Declarative form demo** — the same tool declared entirely in markup with `<form toolname="...">`; no registration code runs, and the Tools panel reports it as an HTML form.
-- **Imperative demo** — `navigator.modelContext.provideContext({ tools })`, a todo list.
+- **[Imperative demo](https://molidestroyer.github.io/webmcp-local-agent/webmcp-demo.html)** —
+  `navigator.modelContext.registerTool(tool)`, a todo list.
+- **[Native API demo](https://molidestroyer.github.io/webmcp-local-agent/webmcp-native-demo.html)**
+  — `document.modelContext`, `getTools()` returning `RegisteredTool` objects whose
+  `inputSchema` is a JSON string, `executeTool(registeredTool, args)`. Its `createFeature`
+  tool has four required inputs, two constrained by `enum` / `anyOf`.
+- **[Declarative form demo](https://molidestroyer.github.io/webmcp-local-agent/webmcp-form-demo.html)**
+  — the same tool declared entirely in markup with `<form toolname="...">`; no registration
+  code runs, and the Tools panel reports it as an HTML form.
+- **[Multi-country contacts demo](https://molidestroyer.github.io/webmcp-local-agent/webmcp-contacts-demo.html)**
+  — country-aware contact tools (`create_contact`, `search_contact`, `validate_address` for
+  ZA/ES/CA) plus the Knowledge Catalog: switch `?region=` and the Settings tab's Rules
+  Inspector picks up matching business rules and suggested prompts.
 
 The same files ship inside the extension (`demo/`), so you can open them offline too.
 `demo/` is the single source for both — the workflow publishes that folder as-is.

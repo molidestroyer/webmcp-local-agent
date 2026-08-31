@@ -96,6 +96,14 @@ Three things about the **current** API, all fixed in 0.4.1 and all easy to regre
   `getTools()` in the page immediately before each execution and matches on name + origin.
   Legacy `callTool(name, args)` runs **only** for contexts without the current API — never
   try the string form first and swallow its TypeError.
+- **Registration is `registerTool(tool)`, once per tool — there is no `provideContext()`.**
+  Confirmed from a real `document.modelContext` dump: a genuine `ModelContext` instance with
+  `registerTool`/`ontoolchange` and nothing else. `provideContext({ tools })` is an
+  older/draft bulk shape some polyfills still expose; a demo page that calls it
+  unconditionally silently registers nothing on the real API (`webmcp-demo.html` and
+  `webmcp-contacts-demo.html` did exactly this — fixed in 0.6.6). Every demo now checks
+  `registerTool` first and only falls back to `provideContext` when that is all a
+  polyfill/draft offers.
 
 `supportsRegisteredToolApi()` detects the current API **by shape** (`getTools` +
 `executeTool`), since the spec exposes no version to test. Its known limit: an old
