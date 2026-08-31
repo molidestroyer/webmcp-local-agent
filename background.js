@@ -205,9 +205,7 @@ async function bridge(tabId, action, payload) {
   });
 }
 
-// --- GitHub Copilot Device Flow Auth & Token Exchange ----------------------
-
-const COPILOT_CLIENT_ID = 'Iv1.b507a08c87ecfe81';
+const COPILOT_CLIENT_ID = 'Iv1.b507a08c87ecfe98';
 
 async function startCopilotAuth() {
   const res = await fetch('https://github.com/login/device/code', {

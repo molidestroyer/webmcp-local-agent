@@ -3,7 +3,7 @@
 ## 0.6.8
 
 Add GitHub Copilot Device Flow Authentication & Unified Multi-Provider Model Architecture:
-- Integrated GitHub OAuth Device Flow (Client ID `Iv1.b507a08c87ecfe81`) in Settings allowing direct, zero-copy connection to GitHub Copilot without manual PAT entry.
+- Integrated GitHub OAuth Device Flow (Client ID `Iv1.b507a08c87ecfe98`) in Settings allowing direct, zero-copy connection to GitHub Copilot without manual PAT entry.
 - Added support for remote Copilot models (`copilot:gpt-4o`, `copilot:gpt-4o-mini`, `copilot:claude-3.5-sonnet`, `copilot:o3-mini`) in a unified multi-provider model selector alongside local Ollama models.
 - Updated agent execution loop to support both Ollama and Copilot completions with full WebMCP tool calling capabilities.
 - Added a 15-second timeout to prompt suggestion generation to prevent hanging loading indicators.
