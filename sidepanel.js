@@ -77,6 +77,7 @@ const els = {
   suggestionsChips: document.getElementById('suggestions-chips'),
   // settings
   autoSuggestToggle: document.getElementById('auto-suggest-toggle'),
+  resetChatOnTabToggle: document.getElementById('reset-chat-on-tab-toggle'),
   catalogSourceNone: document.getElementById('catalog-source-none'),
   catalogSourceDemo: document.getElementById('catalog-source-demo'),
   catalogSourceRemote: document.getElementById('catalog-source-remote'),
@@ -88,6 +89,19 @@ const els = {
   catalogStatusMeta: document.getElementById('catalog-status-meta'),
   catalogRulesCount: document.getElementById('catalog-rules-count'),
   catalogRulesList: document.getElementById('catalog-rules-list'),
+  // copilot settings
+  copilotStatusBox: document.getElementById('copilot-status-box'),
+  copilotDisconnectedView: document.getElementById('copilot-disconnected-view'),
+  copilotPendingView: document.getElementById('copilot-pending-view'),
+  copilotConnectedView: document.getElementById('copilot-connected-view'),
+  copilotConnectBtn: document.getElementById('copilot-connect-btn'),
+  copilotUserCode: document.getElementById('copilot-user-code'),
+  copilotCopyCodeBtn: document.getElementById('copilot-copy-code-btn'),
+  copilotVerifyLink: document.getElementById('copilot-verify-link'),
+  copilotPollingText: document.getElementById('copilot-polling-text'),
+  copilotCancelBtn: document.getElementById('copilot-cancel-btn'),
+  copilotDisconnectBtn: document.getElementById('copilot-disconnect-btn'),
+  copilotErrorMsg: document.getElementById('copilot-error-msg'),
   // tools
   toolsList: document.getElementById('tools-list'),
   toolsEmpty: document.getElementById('tools-empty'),
@@ -129,6 +143,7 @@ const state = {
   busy: false,
   ollamaOk: false,
   autoSuggest: false,
+  resetChatOnTabSwitch: false,
   suggesting: false,
   staticSuggestions: [],
   aiSuggestions: [],
@@ -137,6 +152,9 @@ const state = {
   catalogToken: '',
   catalogData: null,
   activeSystemContext: '',
+  copilotConnected: false,
+  copilotDeviceCode: null,
+  copilotPollingTimer: null,
 };
 
 // --- Generic helpers -------------------------------------------------------
@@ -295,16 +313,55 @@ async function fetchLocalModels() {
 
 function renderModelOptions(placeholder) {
   els.modelSelect.textContent = '';
-  if (placeholder) {
-    els.modelSelect.appendChild(new Option(placeholder, ''));
+  const copilotModels = (globalThis.__WebMCPCopilotService && globalThis.__WebMCPCopilotService.DEFAULT_MODELS) || [];
+  const hasCopilot = state.copilotConnected && copilotModels.length > 0;
+  const hasOllama = state.models.length > 0;
+
+  if (!hasOllama && !hasCopilot) {
+    els.modelSelect.appendChild(new Option(placeholder || 'No models available', ''));
     els.modelSelect.disabled = true;
     return;
   }
+
   els.modelSelect.disabled = false;
-  for (const model of state.models) {
-    const gb = model.size ? ' · ' + (model.size / 1e9).toFixed(1) + ' GB' : '';
-    const tools = model.capabilities.includes('tools') ? ' · tools' : '';
-    els.modelSelect.appendChild(new Option(model.name + gb + tools, model.name));
+
+  if (hasOllama && hasCopilot) {
+    const ollamaGroup = document.createElement('optgroup');
+    ollamaGroup.label = 'Ollama (Local)';
+    for (const model of state.models) {
+      const gb = model.size ? ' · ' + (model.size / 1e9).toFixed(1) + ' GB' : '';
+      const tools = model.capabilities.includes('tools') ? ' · tools' : '';
+      ollamaGroup.appendChild(new Option(model.name + gb + tools, model.name));
+    }
+    els.modelSelect.appendChild(ollamaGroup);
+
+    const copilotGroup = document.createElement('optgroup');
+    copilotGroup.label = 'GitHub Copilot (Remote)';
+    for (const model of copilotModels) {
+      copilotGroup.appendChild(new Option(model.displayName, model.id));
+    }
+    els.modelSelect.appendChild(copilotGroup);
+  } else if (hasOllama) {
+    for (const model of state.models) {
+      const gb = model.size ? ' · ' + (model.size / 1e9).toFixed(1) + ' GB' : '';
+      const tools = model.capabilities.includes('tools') ? ' · tools' : '';
+      els.modelSelect.appendChild(new Option(model.name + gb + tools, model.name));
+    }
+  } else if (hasCopilot) {
+    for (const model of copilotModels) {
+      els.modelSelect.appendChild(new Option(model.displayName, model.id));
+    }
+  }
+
+  if (state.model) {
+    const exists = [...els.modelSelect.options].some((opt) => opt.value === state.model);
+    if (exists) {
+      els.modelSelect.value = state.model;
+    } else {
+      state.model = els.modelSelect.value;
+    }
+  } else {
+    state.model = els.modelSelect.value;
   }
 }
 
@@ -564,7 +621,8 @@ function renderSuggestions() {
 }
 
 async function generatePromptSuggestions() {
-  if (!state.autoSuggest || !state.ollamaOk || !state.model || !state.tools || !state.tools.length || state.busy) {
+  const providerOk = state.ollamaOk || state.copilotConnected;
+  if (!state.autoSuggest || !providerOk || !state.model || !state.tools || !state.tools.length || state.busy) {
     state.suggesting = false;
     state.aiSuggestions = [];
     renderSuggestions();
@@ -575,11 +633,14 @@ async function generatePromptSuggestions() {
     suggestAbortController.abort();
   }
   suggestAbortController = new AbortController();
+  const timeoutId = setTimeout(() => {
+    if (suggestAbortController) suggestAbortController.abort();
+  }, 15000);
   const signal = suggestAbortController.signal;
 
   state.suggesting = true;
-  if (els.suggestions) els.suggestions.hidden = false;
-  if (els.suggestionsLoading) els.suggestionsLoading.hidden = false;
+  state.aiSuggestions = [];
+  renderSuggestions();
 
   const toolNames = state.tools.map((t) => t.name);
   const toolSummary = state.tools.map((t) => `- ${t.name}: ${t.description || 'No description'}`).join('\n');
@@ -597,20 +658,12 @@ async function generatePromptSuggestions() {
   }
   prompt += ` These suggestions become clickable chips that get sent verbatim as the user's own next chat message, so every suggestion MUST be phrased in the user's voice, as something THEY would say to the assistant (e.g. "Create a contact for Ada Lovelace in Spain, DNI 12345678Z, postal code 28001") — NEVER as the assistant asking the user a question (e.g. never "Please provide..." or "Do you want to..."). Output MUST be ONLY a JSON array of strings, e.g. ["Suggestion 1", "Suggestion 2"]. Do NOT include any markdown code blocks, explanation, or extra text.`;
 
-  // Logged to History (origin: 'suggestion') so a stuck or failing suggestion
-  // call is as visible as a failed tool run — this generates no page tool
-  // call of its own, only a meta request to Ollama. Aborted attempts (a newer
-  // request superseding this one) are not logged: they are not failures.
   const started = performance.now();
   const args = {
     tools: toolNames,
     model: state.model,
     usedConversation: Boolean(conversationSummary),
     usedCatalog: Boolean(state.activeSystemContext),
-    // The exact text sent to Ollama to generate these suggestions — there is
-    // no separate "system prompt" for this call (see ollamaChat body below),
-    // this user-role message is the whole of it. Kept here, not truncated,
-    // so a weird suggestion can be traced back to what actually produced it.
     prompt,
   };
   const logResult = (ok, output) => {
@@ -618,29 +671,36 @@ async function generatePromptSuggestions() {
   };
 
   try {
-    const response = await fetch(state.host + '/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: state.model,
-        messages: [{ role: 'user', content: prompt }],
-        stream: false,
-      }),
-      signal,
-    });
+    let content = '';
+    if (state.model.startsWith('copilot:')) {
+      const copilotReply = await copilotChat([{ role: 'user', content: prompt }], undefined, () => {});
+      content = (copilotReply && copilotReply.content) || '';
+    } else {
+      const response = await fetch(state.host + '/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: state.model,
+          messages: [{ role: 'user', content: prompt }],
+          stream: false,
+        }),
+        signal,
+      });
 
-    if (!response.ok) {
-      state.suggesting = false;
-      state.aiSuggestions = [];
-      renderSuggestions();
-      logResult(false, 'Ollama responded ' + response.status + ' while generating suggestions.');
-      return;
+      if (!response.ok) {
+        state.suggesting = false;
+        state.aiSuggestions = [];
+        renderSuggestions();
+        logResult(false, 'Model provider responded ' + response.status + ' while generating suggestions.');
+        return;
+      }
+
+      const data = await response.json();
+      content = (data.message && data.message.content) || '';
     }
 
-    const data = await response.json();
     if (signal.aborted) return;
 
-    let content = (data.message && data.message.content) || '';
     content = content.trim();
     if (content.startsWith('```')) {
       content = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
@@ -678,30 +738,42 @@ async function generatePromptSuggestions() {
     renderSuggestions();
     logResult(false, String((err && err.message) || err));
   } finally {
+    clearTimeout(timeoutId);
     state.suggesting = false;
     if (els.suggestionsLoading) els.suggestionsLoading.hidden = true;
   }
 }
 
 /**
- * The chat conversation deliberately survives a tab switch (losing it would
- * be worse: a lot of real workflows read page A then act on page B). But the
+ * By default the chat conversation survives a tab switch (losing it would be
+ * worse: a lot of real workflows read page A then act on page B) — but the
  * tools available silently change underneath it, so a mid-conversation
  * switch gets a visible note — both in the transcript and in what the model
  * sees — instead of the model quietly acting on a different page's tools
- * than the ones the user was just talking about.
+ * than the ones the user was just talking about. Users who would rather
+ * start fresh on every tab switch can flip that in Settings.
  */
 function announceTabChangeIfNeeded() {
   const changed = state.lastNotedTabId !== undefined && state.lastNotedTabId !== state.tabId;
   state.lastNotedTabId = state.tabId;
   if (!changed || state.messages.length <= 1) return;
 
-  const label = state.tabUrl || 'this tab';
-  const text = state.tools.length
-    ? `Switched to a different tab (${label}). ${state.tools.length} tool(s) now available here.`
-    : `Switched to a different tab (${label}). This page exposes no WebMCP tools.`;
-  addMessage('note', text);
-  state.messages.push({ role: 'system', content: text });
+  if (state.resetChatOnTabSwitch) {
+    resetConversation();
+  } else {
+    const label = state.tabUrl || 'this tab';
+    const text = state.tools.length
+      ? `Switched to a different tab (${label}). ${state.tools.length} tool(s) now available here.`
+      : `Switched to a different tab (${label}). This page exposes no WebMCP tools.`;
+    addMessage('note', text);
+    state.messages.push({ role: 'system', content: text });
+  }
+
+  // Either way the conversation just changed shape (reset, or a new note in
+  // it) and the tab's tools are new: any suggestion chip still on screen was
+  // computed for the previous tab/conversation and must not linger while a
+  // fresh one is generated.
+  state.aiSuggestions = [];
 }
 
 async function detectPageTools() {
@@ -1370,6 +1442,20 @@ function addMessage(role, text) {
   return div;
 }
 
+/** Shared by the 🗑 button and the "reset on tab switch" setting. */
+function resetConversation() {
+  state.messages = [{ role: 'system', content: SYSTEM_PROMPT }];
+  els.chat.textContent = '';
+  const empty = document.createElement('div');
+  empty.className = 'empty';
+  const title = document.createElement('h1');
+  title.textContent = 'Conversation cleared';
+  const hint = document.createElement('p');
+  hint.textContent = 'Type a message to start over.';
+  empty.append(title, hint);
+  els.chat.appendChild(empty);
+}
+
 function createAssistantBubble() {
   clearEmptyState();
   const wrapper = document.createElement('div');
@@ -1682,7 +1768,42 @@ async function runToolCall(call) {
   return { role: 'tool', tool_name: name, content: text };
 }
 
+async function copilotChat(messages, tools, onChunk) {
+  const tokenRes = await new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'GET_OR_REFRESH_COPILOT_TOKEN', forceRefresh: false }, resolve);
+  });
+
+  if (!tokenRes || !tokenRes.success || !tokenRes.token) {
+    throw new Error((tokenRes && tokenRes.error) || 'Copilot session token invalid. Please reconnect Copilot in Settings.');
+  }
+
+  const Copilot = globalThis.__WebMCPCopilotService;
+  if (!Copilot) {
+    throw new Error('CopilotService library not loaded.');
+  }
+
+  const endpointUrl = tokenRes.endpoints && tokenRes.endpoints.api
+    ? (tokenRes.endpoints.api.replace(/\/$/, '') + '/chat/completions')
+    : undefined;
+
+  const result = await Copilot.chatCompletion({
+    model: state.model,
+    messages,
+    tools,
+    sessionToken: tokenRes.token,
+    endpointUrl,
+  });
+
+  if (result && result.message && result.message.content) {
+    onChunk('text', result.message.content);
+  }
+
+  return result.message;
+}
+
 async function runAgent() {
+  const isCopilot = state.model.startsWith('copilot:');
+
   for (let step = 0; step < MAX_TOOL_STEPS; step++) {
     await detectPageTools();
     const tools = state.tools.map(toOllamaTool);
@@ -1691,12 +1812,14 @@ async function runAgent() {
     const bubble = createAssistantBubble();
     let reply;
     try {
-      reply = await ollamaChat(state.messages, tools, (kind, delta) => bubble.append(kind, delta));
+      if (isCopilot) {
+        reply = await copilotChat(state.messages, tools, (kind, delta) => bubble.append(kind, delta));
+      } else {
+        reply = await ollamaChat(state.messages, tools, (kind, delta) => bubble.append(kind, delta));
+      }
     } catch (err) {
-      // A 403 will not fix itself on retry: Ollama has to be reconfigured, so
-      // keep the hint pinned in the status bar as well as in the chat.
       if (err && err.status === 403) showStatus(CORS_HINT);
-      bubble.fail('Failed to reach Ollama: ' + String((err && err.message) || err));
+      bubble.fail('Failed to reach AI provider: ' + String((err && err.message) || err));
       return;
     }
 
@@ -1784,6 +1907,13 @@ if (els.autoSuggestToggle) {
   });
 }
 
+if (els.resetChatOnTabToggle) {
+  els.resetChatOnTabToggle.addEventListener('change', () => {
+    state.resetChatOnTabSwitch = els.resetChatOnTabToggle.checked;
+    chrome.storage.local.set({ resetChatOnTabSwitch: state.resetChatOnTabSwitch });
+  });
+}
+
 if (els.catalogSourceNone && els.catalogSourceDemo && els.catalogSourceRemote) {
   const toggleSourceFields = () => {
     const isRemote = els.catalogSourceRemote.checked;
@@ -1812,16 +1942,7 @@ els.historyClear.addEventListener('click', () => {
 });
 
 els.clearChat.addEventListener('click', () => {
-  state.messages = [{ role: 'system', content: SYSTEM_PROMPT }];
-  els.chat.textContent = '';
-  const empty = document.createElement('div');
-  empty.className = 'empty';
-  const title = document.createElement('h1');
-  title.textContent = 'Conversation cleared';
-  const hint = document.createElement('p');
-  hint.textContent = 'Type a message to start over.';
-  empty.append(title, hint);
-  els.chat.appendChild(empty);
+  resetConversation();
 
   // Back to a blank conversation: re-offer the same starting suggestions a
   // fresh page load would show, not stale follow-ups from the cleared chat.
@@ -1858,6 +1979,138 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
+// --- GitHub Copilot Device Flow Auth Controller -----------------------------
+
+function renderCopilotStatus() {
+  if (!els.copilotStatusBox) return;
+
+  if (state.copilotConnected) {
+    if (els.copilotDisconnectedView) els.copilotDisconnectedView.hidden = true;
+    if (els.copilotPendingView) els.copilotPendingView.hidden = true;
+    if (els.copilotConnectedView) els.copilotConnectedView.hidden = false;
+    if (els.copilotErrorMsg) els.copilotErrorMsg.hidden = true;
+  } else if (state.copilotDeviceCode) {
+    if (els.copilotDisconnectedView) els.copilotDisconnectedView.hidden = true;
+    if (els.copilotPendingView) els.copilotPendingView.hidden = false;
+    if (els.copilotConnectedView) els.copilotConnectedView.hidden = true;
+  } else {
+    if (els.copilotDisconnectedView) els.copilotDisconnectedView.hidden = false;
+    if (els.copilotPendingView) els.copilotPendingView.hidden = true;
+    if (els.copilotConnectedView) els.copilotConnectedView.hidden = true;
+  }
+}
+
+async function checkCopilotStatus() {
+  const stored = await chrome.storage.local.get(['github_oauth_token']);
+  state.copilotConnected = Boolean(stored.github_oauth_token);
+  renderCopilotStatus();
+  renderModelOptions();
+}
+
+async function startCopilotFlow() {
+  if (els.copilotErrorMsg) els.copilotErrorMsg.hidden = true;
+  if (els.copilotConnectBtn) els.copilotConnectBtn.disabled = true;
+
+  try {
+    const res = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'START_COPILOT_AUTH' }, resolve);
+    });
+
+    if (!res || !res.success) {
+      throw new Error((res && res.error) || 'Failed to start GitHub device flow.');
+    }
+
+    state.copilotDeviceCode = res.device_code;
+    if (els.copilotUserCode) els.copilotUserCode.textContent = res.user_code;
+    if (els.copilotVerifyLink) els.copilotVerifyLink.href = res.verification_uri || 'https://github.com/login/device';
+
+    renderCopilotStatus();
+
+    chrome.tabs.create({ url: res.verification_uri || 'https://github.com/login/device' }).catch(() => {});
+
+    pollCopilotFlow(res.device_code, res.interval || 5);
+  } catch (err) {
+    if (els.copilotErrorMsg) {
+      els.copilotErrorMsg.textContent = String(err.message || err);
+      els.copilotErrorMsg.hidden = false;
+    }
+  } finally {
+    if (els.copilotConnectBtn) els.copilotConnectBtn.disabled = false;
+  }
+}
+
+function cancelCopilotFlow() {
+  if (state.copilotPollingTimer) {
+    clearTimeout(state.copilotPollingTimer);
+    state.copilotPollingTimer = null;
+  }
+  state.copilotDeviceCode = null;
+  renderCopilotStatus();
+}
+
+function pollCopilotFlow(deviceCode, intervalSec) {
+  if (state.copilotPollingTimer) clearTimeout(state.copilotPollingTimer);
+
+  state.copilotPollingTimer = setTimeout(async () => {
+    if (!state.copilotDeviceCode || state.copilotDeviceCode !== deviceCode) return;
+
+    const res = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'POLL_COPILOT_AUTH', device_code: deviceCode }, resolve);
+    });
+
+    if (!res || !res.success) {
+      if (res && res.error === 'authorization_pending') {
+        pollCopilotFlow(deviceCode, res.interval || intervalSec);
+      } else if (res && res.error === 'slow_down') {
+        pollCopilotFlow(deviceCode, (res.interval || intervalSec) + 5);
+      } else {
+        cancelCopilotFlow();
+        if (els.copilotErrorMsg) {
+          els.copilotErrorMsg.textContent = (res && res.error_description) || (res && res.error) || 'Authorization failed.';
+          els.copilotErrorMsg.hidden = false;
+        }
+      }
+      return;
+    }
+
+    cancelCopilotFlow();
+    state.copilotConnected = true;
+    renderCopilotStatus();
+    renderModelOptions();
+    fetchLocalModels();
+  }, intervalSec * 1000);
+}
+
+async function disconnectCopilot() {
+  await new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'REVOKE_COPILOT_AUTH' }, resolve);
+  });
+  state.copilotConnected = false;
+  renderCopilotStatus();
+  renderModelOptions();
+}
+
+if (els.copilotConnectBtn) {
+  els.copilotConnectBtn.addEventListener('click', startCopilotFlow);
+}
+if (els.copilotCancelBtn) {
+  els.copilotCancelBtn.addEventListener('click', cancelCopilotFlow);
+}
+if (els.copilotDisconnectBtn) {
+  els.copilotDisconnectBtn.addEventListener('click', disconnectCopilot);
+}
+if (els.copilotCopyCodeBtn) {
+  els.copilotCopyCodeBtn.addEventListener('click', () => {
+    if (els.copilotUserCode && els.copilotUserCode.textContent) {
+      navigator.clipboard.writeText(els.copilotUserCode.textContent.trim());
+      els.copilotCopyCodeBtn.textContent = '✔ Copied!';
+      setTimeout(() => {
+        if (els.copilotCopyCodeBtn) els.copilotCopyCodeBtn.textContent = '📋 Copy Code';
+      }, 2000);
+    }
+  });
+}
+
 // --- Bootstrap -------------------------------------------------------------
 
 (async function init() {
@@ -1866,10 +2119,13 @@ chrome.runtime.onMessage.addListener((message) => {
     state.windowId = window_ ? window_.id : null;
   } catch (_) { /* fall back to reacting to every window */ }
 
+  await checkCopilotStatus();
+
   const stored = await chrome.storage.local.get([
     'confirmTools',
     'activeTab',
     'autoSuggest',
+    'resetChatOnTabSwitch',
     'catalogSourceMode',
     'catalogUrl',
     'catalogToken',
@@ -1879,6 +2135,8 @@ chrome.runtime.onMessage.addListener((message) => {
   els.confirmTools.checked = Boolean(stored.confirmTools);
   state.autoSuggest = Boolean(stored.autoSuggest);
   if (els.autoSuggestToggle) els.autoSuggestToggle.checked = state.autoSuggest;
+  state.resetChatOnTabSwitch = Boolean(stored.resetChatOnTabSwitch);
+  if (els.resetChatOnTabToggle) els.resetChatOnTabToggle.checked = state.resetChatOnTabSwitch;
 
   state.catalogSourceMode = stored.catalogSourceMode || 'none';
   state.catalogUrl = stored.catalogUrl || '';

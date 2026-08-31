@@ -141,7 +141,21 @@
         </label>
       </div>
 
-      <!-- Group 2: Knowledge & Business Rules Catalog -->
+      <!-- Group 2: Chat Behavior -->
+      <div class="setting-card">
+        <div class="field-label">Chat Behavior</div>
+        <label class="setting-item" title="What happens to the conversation when you switch to a different Chrome tab mid-chat">
+          <input type="checkbox" id="reset-chat-on-tab-toggle">
+          <div class="setting-item__text">
+            <span class="setting-item__title">Reset conversation when switching tabs</span>
+            <span class="setting-item__desc">
+              Off by default: switching tabs keeps the conversation and adds a note about the new tab's tools. On: switching tabs starts a fresh conversation, like pressing 🗑.
+            </span>
+          </div>
+        </label>
+      </div>
+
+      <!-- Group 3: Knowledge & Business Rules Catalog -->
       <div class="setting-card">
         <div class="field-label">Knowledge & Prompt Catalog</div>
 
@@ -182,13 +196,59 @@
         </div>
       </div>
 
-      <!-- Group 3: Catalog Rules Inspector -->
+      <!-- Group 4: Catalog Rules Inspector -->
       <div class="setting-card">
         <div class="field-label field-label--row">
           <span>Active Rules Inspector</span>
           <span id="catalog-rules-count" class="hint">0 rules</span>
         </div>
         <div id="catalog-rules-list" class="catalog-rules-list"></div>
+      </div>
+      <!-- Group 4: GitHub Copilot Authentication -->
+      <div class="setting-card">
+        <div class="field-label">GitHub Copilot Connection</div>
+        <div id="copilot-status-box" class="copilot-card">
+          <!-- Disconnected state -->
+          <div id="copilot-disconnected-view">
+            <p class="setting-item__desc">
+              Connect your GitHub account using OAuth Device Flow to use remote Copilot models (GPT-4o, Claude 3.5, etc.) alongside local Ollama models.
+            </p>
+            <button id="copilot-connect-btn" class="btn-primary" type="button">⚡ Connect GitHub Copilot</button>
+          </div>
+
+          <!-- Pending state -->
+          <div id="copilot-pending-view" hidden>
+            <p class="setting-item__desc">Enter this code on GitHub to authorize:</p>
+            <div class="copilot-user-code-row">
+              <span id="copilot-user-code" class="copilot-code-badge">---- ----</span>
+              <button id="copilot-copy-code-btn" class="btn-small" type="button">📋 Copy Code</button>
+            </div>
+            <div style="margin-top: 8px;">
+              <a id="copilot-verify-link" href="https://github.com/login/device" target="_blank" rel="noreferrer noopener" class="copilot-verify-link">
+                🔗 Open github.com/login/device
+              </a>
+            </div>
+            <div class="copilot-polling-status">
+              <span class="is-spinning" aria-hidden="true">🔄</span>
+              <span id="copilot-polling-text">Waiting for GitHub approval…</span>
+            </div>
+            <button id="copilot-cancel-btn" class="btn-small btn-cancel" type="button" style="margin-top: 8px;">Cancel</button>
+          </div>
+
+          <!-- Connected state -->
+          <div id="copilot-connected-view" hidden>
+            <div class="copilot-connected-header">
+              <span class="chip chip--ok">✔ GitHub Copilot Connected</span>
+            </div>
+            <p class="setting-item__desc">
+              Copilot session active. Remote models (GPT-4o, Claude 3.5, etc.) are available in the model selector.
+            </p>
+            <button id="copilot-disconnect-btn" class="btn-small btn-danger" type="button">Disconnect / Revoke Token</button>
+          </div>
+
+          <!-- Error message -->
+          <div id="copilot-error-msg" class="setting-error" hidden></div>
+        </div>
       </div>
     </section>
   </main>
@@ -220,6 +280,7 @@
 
   <script src="lib/webmcp-schema.js"></script>
   <script src="lib/catalog-service.js"></script>
+  <script src="lib/copilot-service.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

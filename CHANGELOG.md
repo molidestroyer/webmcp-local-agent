@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.6.7
+## 0.6.8
+
+Add GitHub Copilot Device Flow Authentication & Unified Multi-Provider Model Architecture:
+- Integrated GitHub OAuth Device Flow (Client ID `Iv1.b507a08c87ecfe81`) in Settings allowing direct, zero-copy connection to GitHub Copilot without manual PAT entry.
+- Added support for remote Copilot models (`copilot:gpt-4o`, `copilot:gpt-4o-mini`, `copilot:claude-3.5-sonnet`, `copilot:o3-mini`) in a unified multi-provider model selector alongside local Ollama models.
+- Updated agent execution loop to support both Ollama and Copilot completions with full WebMCP tool calling capabilities.
+- Added a 15-second timeout to prompt suggestion generation to prevent hanging loading indicators.
+
 
 Fix suggestions being phrased as assistant questions, add tab-switch awareness, richer History debugging, and a fuller contacts demo:
 - The AI-suggestion prompt never told the model these strings get sent verbatim as the *user's own* next chat message — the model was phrasing them as itself asking the user for input ("Please provide...", "Do you want to..."). The prompt now says so explicitly and asks for concrete example values instead of generic restatements of a tool's description.

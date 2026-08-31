@@ -128,6 +128,15 @@
       font-size: 11px;
       color: var(--text-dim);
     }
+    .form-error {
+      padding: 8px 12px;
+      border: 1px solid #4a2230;
+      border-radius: 8px;
+      background: #2a1420;
+      color: #f2a5b8;
+      font-size: 12.5px;
+      margin-bottom: 12px;
+    }
     .contact-row__del {
       padding: 3px 9px;
       border: 1px solid #4a2230;
@@ -195,6 +204,7 @@
         <input type="text" id="address" placeholder="e.g. 100 Main Street">
       </div>
 
+      <div id="form-error" class="form-error" hidden></div>
       <button type="submit" class="btn-primary">Add Contact</button>
     </form>
   </div>
@@ -291,13 +301,61 @@
       }
     }
 
+    // Shared by create_contact and validate_address: this is exactly the
+    // per-country format knowledge the Knowledge Catalog's systemContext
+    // spells out. With the catalog loaded, the model is told the formats up
+    // front and tends to get them right; without it, it has to guess from
+    // the tool description alone and is far more likely to hit these.
+    function postalCodeIssue(country, postalCode) {
+      const value = String(postalCode || '').trim();
+      if (country === 'ZA' && !/^\d{4}$/.test(value)) {
+        return 'South African postal codes must be exactly 4 digits.';
+      }
+      if (country === 'ES' && !/^\d{5}$/.test(value)) {
+        return 'Spanish postal codes must be exactly 5 digits.';
+      }
+      if (country === 'CA' && !/^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/.test(value)) {
+        return 'Canadian postal codes must follow format A1A 1A1.';
+      }
+      return null;
+    }
+
+    function taxIdIssue(country, taxId) {
+      const value = String(taxId || '').trim();
+      if (country === 'ZA' && !/^\d{13}$/.test(value)) {
+        return 'South African IDs must be exactly 13 digits.';
+      }
+      if (country === 'ES' && !/^(\d{8}[A-Za-z]|[XYZxyz]\d{7}[A-Za-z])$/.test(value)) {
+        return 'Spanish DNI must be 8 digits + a letter, or NIE must be X/Y/Z + 7 digits + a letter.';
+      }
+      if (country === 'CA' && !/^\d{3}[-\s]?\d{3}[-\s]?\d{3}$/.test(value)) {
+        return 'Canadian SIN must be 9 digits (optionally grouped as 123-456-789).';
+      }
+      return null;
+    }
+
     function createContact(args) {
+      const country = args.country || 'ZA';
+      const taxId = args.taxId || '';
+      const postalCode = args.postalCode || '';
+
+      const taxIssue = taxIdIssue(country, taxId);
+      if (taxIssue) {
+        log(`REJECTED CONTACT (${args.fullName || 'Unnamed'}, ${country}) -> invalid taxId: ${taxIssue}`);
+        return { success: false, field: 'taxId', error: taxIssue };
+      }
+      const zipIssue = postalCodeIssue(country, postalCode);
+      if (zipIssue) {
+        log(`REJECTED CONTACT (${args.fullName || 'Unnamed'}, ${country}) -> invalid postalCode: ${zipIssue}`);
+        return { success: false, field: 'postalCode', error: zipIssue };
+      }
+
       const contact = {
         id: 'CT-' + Math.floor(1000 + Math.random() * 9000),
         fullName: args.fullName || 'Unnamed',
-        country: args.country || 'ZA',
-        taxId: args.taxId || '',
-        postalCode: args.postalCode || '',
+        country,
+        taxId,
+        postalCode,
         address: args.address || '',
         createdAt: new Date().toISOString()
       };
@@ -339,19 +397,9 @@
     function validateAddress(args) {
       const country = args.country || 'ZA';
       const postalCode = args.postalCode || '';
-      let valid = true;
-      let reason = 'Valid address structure';
-
-      if (country === 'ZA' && !/^\d{4}$/.test(postalCode.trim())) {
-        valid = false;
-        reason = 'South African postal codes must be exactly 4 digits.';
-      } else if (country === 'ES' && !/^\d{5}$/.test(postalCode.trim())) {
-        valid = false;
-        reason = 'Spanish postal codes must be exactly 5 digits.';
-      } else if (country === 'CA' && !/^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/.test(postalCode.trim())) {
-        valid = false;
-        reason = 'Canadian postal codes must follow format A1A 1A1.';
-      }
+      const issue = postalCodeIssue(country, postalCode);
+      const valid = !issue;
+      const reason = issue || 'Valid address structure';
 
       log(`VALIDATED ADDRESS (${country}, "${postalCode}") -> valid: ${valid} (${reason})`);
       return { valid, reason, country, postalCode };
@@ -359,13 +407,21 @@
 
     function handleManualSubmit(e) {
       e.preventDefault();
-      createContact({
+      const result = createContact({
         fullName: document.getElementById('fullName').value,
         country: document.getElementById('country').value,
         taxId: document.getElementById('taxId').value,
         postalCode: document.getElementById('postalCode').value,
         address: document.getElementById('address').value
       });
+
+      const errorBox = document.getElementById('form-error');
+      if (!result.success) {
+        errorBox.textContent = `${result.field}: ${result.error}`;
+        errorBox.hidden = false;
+        return;
+      }
+      errorBox.hidden = true;
       document.getElementById('contact-form').reset();
       syncRegionUI();
     }
@@ -399,15 +455,15 @@
     const contactTools = [
       {
         name: 'create_contact',
-        description: 'Creates a new contact with country-specific tax ID and postal code validation.',
+        description: 'Creates a new contact. Rejects it with a validation error if taxId or postalCode do not match the format required for the given country — check the Knowledge Catalog / business rules for the exact formats before calling this.',
         inputSchema: {
           type: 'object',
           required: ['fullName', 'country', 'taxId', 'postalCode'],
           properties: {
             fullName: { type: 'string', description: 'Full name of the contact' },
             country: { type: 'string', enum: ['ZA', 'ES', 'CA'], description: 'Country code' },
-            taxId: { type: 'string', description: 'National ID, DNI/NIF, or SIN' },
-            postalCode: { type: 'string', description: 'Postal Code' },
+            taxId: { type: 'string', description: 'National ID, DNI/NIF, or SIN — format is validated per country' },
+            postalCode: { type: 'string', description: 'Postal Code — format is validated per country' },
             address: { type: 'string', description: 'Street address' }
           }
         },

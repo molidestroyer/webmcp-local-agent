@@ -1,13 +1,15 @@
 {
   "manifest_version": 3,
   "name": "WebMCP Local Agent",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "description": "Chat with local Ollama and let it call the WebMCP tools exposed by the active page.",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "activeTab", "scripting", "storage", "tabs", "webNavigation"],
   "host_permissions": [
     "http://localhost:11434/*",
     "http://127.0.0.1:11434/*",
+    "https://github.com/*",
+    "https://api.github.com/*",
     "<all_urls>"
   ],
   "background": {
