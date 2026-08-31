@@ -54,3 +54,9 @@ test('formatMessagesForCopilot formats user and assistant messages', () => {
   assert.equal(formatted[1].tool_calls[0].function.name, 'search_contact');
   assert.equal(formatted[1].tool_calls[0].function.arguments, '{"query":"Ada"}');
 });
+
+test('fetchCopilotModels returns models list', async () => {
+  const models = await CopilotService.fetchCopilotModels('fake-token');
+  assert.ok(Array.isArray(models));
+  assert.ok(models.length >= 4);
+});

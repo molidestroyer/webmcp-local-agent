@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.12
+
+Expand Copilot model options & add dynamic model fetching:
+- Expanded built-in Copilot models list to include `GPT-4o`, `GPT-4o Mini`, `GPT-4`, `Claude 3.5 Sonnet`, `Claude 3.7 Sonnet`, `o1`, `o1 Mini`, `o1 Preview`, `o3-mini`, and `Gemini 2.0 Flash`.
+- Added dynamic model fetching from Copilot `/models` endpoint to auto-discover models enabled for the user's Copilot subscription.
+
+## 0.6.11
+
+Add Copilot completion header overrides and automatic multi-endpoint fallback:
+- Added OpenAI organization (`Openai-Organization: github-copilot`) and intent (`Openai-Intent: conversation-panel`) headers to Copilot completions requests.
+- Added automatic endpoint fallback (`api.individual.githubcopilot.com` and `api.githubcopilot.com`).
+
 ## 0.6.10
 
 Fix GitHub Copilot token exchange error handling and connection state verification:
