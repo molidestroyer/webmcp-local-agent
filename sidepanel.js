@@ -333,6 +333,16 @@ async function bridge(action, payload) {
 const C = globalThis.__WebMCPCatalogService;
 let suggestAbortController = null;
 
+/** Last few real exchanges, so a post-turn suggestion can follow up on them. */
+function recentConversationSummary() {
+  const turns = state.messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content);
+  if (!turns.length) return '';
+  return turns
+    .slice(-6)
+    .map((m) => (m.role === 'user' ? 'User: ' : 'Assistant: ') + String(m.content).slice(0, 300))
+    .join('\n');
+}
+
 function renderCatalogRulesInspector() {
   if (!els.catalogRulesList) return;
   els.catalogRulesList.textContent = '';
@@ -570,18 +580,31 @@ async function generatePromptSuggestions() {
 
   const toolNames = state.tools.map((t) => t.name);
   const toolSummary = state.tools.map((t) => `- ${t.name}: ${t.description || 'No description'}`).join('\n');
+  const conversationSummary = recentConversationSummary();
+
   let prompt = `Available page tools:\n${toolSummary}\n`;
   if (state.activeSystemContext) {
     prompt += `\nBusiness rules and context:\n${state.activeSystemContext}\n`;
   }
-  prompt += `\nSuggest between 1 and 3 short, direct user questions or actions that can be requested using these tools and context. Output MUST be ONLY a JSON array of strings, e.g. ["Suggestion 1", "Suggestion 2"]. Do NOT include any markdown code blocks, explanation, or extra text.`;
+  if (conversationSummary) {
+    prompt += `\nRecent conversation:\n${conversationSummary}\n`;
+    prompt += `\nGiven how the conversation just went, suggest between 1 and 3 short, direct follow-up questions or actions the user might want next, using the tools and context above.`;
+  } else {
+    prompt += `\nSuggest between 1 and 3 short, direct user questions or actions that can be requested using these tools and context.`;
+  }
+  prompt += ` Output MUST be ONLY a JSON array of strings, e.g. ["Suggestion 1", "Suggestion 2"]. Do NOT include any markdown code blocks, explanation, or extra text.`;
 
   // Logged to History (origin: 'suggestion') so a stuck or failing suggestion
   // call is as visible as a failed tool run — this generates no page tool
   // call of its own, only a meta request to Ollama. Aborted attempts (a newer
   // request superseding this one) are not logged: they are not failures.
   const started = performance.now();
-  const args = { tools: toolNames, model: state.model };
+  const args = {
+    tools: toolNames,
+    model: state.model,
+    usedConversation: Boolean(conversationSummary),
+    usedCatalog: Boolean(state.activeSystemContext),
+  };
   const logResult = (ok, output) => {
     recordExecution({ tool: 'suggestions', origin: 'suggestion', args, ok, output, ms: performance.now() - started });
   };
@@ -1681,6 +1704,11 @@ async function sendMessage() {
     updateSendState();
     els.input.focus();
   }
+
+  // The turn just ended: offer contextual follow-ups. generatePromptSuggestions()
+  // already no-ops cleanly when autoSuggest/Ollama/tools are not ready, so this
+  // is safe to call unconditionally rather than duplicating its readiness checks.
+  generatePromptSuggestions();
 }
 
 // --- Events ----------------------------------------------------------------
@@ -1765,6 +1793,10 @@ els.clearChat.addEventListener('click', () => {
   hint.textContent = 'Type a message to start over.';
   empty.append(title, hint);
   els.chat.appendChild(empty);
+
+  // Back to a blank conversation: re-offer the same starting suggestions a
+  // fresh page load would show, not stale follow-ups from the cleared chat.
+  generatePromptSuggestions();
 });
 
 els.confirmTools.addEventListener('change', () => {
