@@ -810,6 +810,8 @@ body {
   gap: 6px;
 }
 
+.suggestions[hidden] { display: none; }
+
 .suggestions__loading {
   display: flex;
   align-items: center;
@@ -817,6 +819,8 @@ body {
   font-size: 11px;
   color: var(--text-faint);
 }
+
+.suggestions__loading[hidden] { display: none; }
 
 .suggestions__loading .is-spinning {
   display: inline-block;

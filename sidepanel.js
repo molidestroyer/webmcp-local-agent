@@ -568,12 +568,23 @@ async function generatePromptSuggestions() {
   if (els.suggestions) els.suggestions.hidden = false;
   if (els.suggestionsLoading) els.suggestionsLoading.hidden = false;
 
+  const toolNames = state.tools.map((t) => t.name);
   const toolSummary = state.tools.map((t) => `- ${t.name}: ${t.description || 'No description'}`).join('\n');
   let prompt = `Available page tools:\n${toolSummary}\n`;
   if (state.activeSystemContext) {
     prompt += `\nBusiness rules and context:\n${state.activeSystemContext}\n`;
   }
   prompt += `\nSuggest between 1 and 3 short, direct user questions or actions that can be requested using these tools and context. Output MUST be ONLY a JSON array of strings, e.g. ["Suggestion 1", "Suggestion 2"]. Do NOT include any markdown code blocks, explanation, or extra text.`;
+
+  // Logged to History (origin: 'suggestion') so a stuck or failing suggestion
+  // call is as visible as a failed tool run — this generates no page tool
+  // call of its own, only a meta request to Ollama. Aborted attempts (a newer
+  // request superseding this one) are not logged: they are not failures.
+  const started = performance.now();
+  const args = { tools: toolNames, model: state.model };
+  const logResult = (ok, output) => {
+    recordExecution({ tool: 'suggestions', origin: 'suggestion', args, ok, output, ms: performance.now() - started });
+  };
 
   try {
     const response = await fetch(state.host + '/api/chat', {
@@ -591,6 +602,7 @@ async function generatePromptSuggestions() {
       state.suggesting = false;
       state.aiSuggestions = [];
       renderSuggestions();
+      logResult(false, 'Ollama responded ' + response.status + ' while generating suggestions.');
       return;
     }
 
@@ -617,6 +629,7 @@ async function generatePromptSuggestions() {
       state.suggesting = false;
       state.aiSuggestions = [];
       renderSuggestions();
+      logResult(false, 'Model returned no usable suggestions. Raw reply: ' + content.slice(0, 300));
       return;
     }
 
@@ -627,10 +640,12 @@ async function generatePromptSuggestions() {
 
     state.aiSuggestions = validSuggestions;
     renderSuggestions();
+    logResult(true, validSuggestions.join(' | '));
   } catch (err) {
     if (err && err.name === 'AbortError') return;
     state.aiSuggestions = [];
     renderSuggestions();
+    logResult(false, String((err && err.message) || err));
   } finally {
     state.suggesting = false;
     if (els.suggestionsLoading) els.suggestionsLoading.hidden = true;
@@ -1249,7 +1264,7 @@ function renderHistory() {
     name.textContent = entry.tool;
     const origin = document.createElement('span');
     origin.className = 'hist__origin';
-    origin.textContent = entry.origin === 'manual' ? 'manual' : 'chat';
+    origin.textContent = entry.origin === 'manual' ? 'manual' : entry.origin === 'suggestion' ? 'suggestion' : 'chat';
     const meta = document.createElement('span');
     meta.className = 'hist__meta';
     const when = new Date(entry.ts);
