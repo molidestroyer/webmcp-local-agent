@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.14
+
+Remove hardcoded Copilot default models:
+- Discarded static/hardcoded model fallbacks. The extension now relies strictly on models fetched dynamically from GitHub's `/models` API for the authenticated Copilot session.
+
+## 0.6.13
+
+Wire up dynamic Copilot model fetching and logging in sidepanel:
+- Connected `fetchRemoteCopilotModels()` in `sidepanel.js` so Copilot models are dynamically fetched from the `/models` endpoint using the active session token upon connection or clicking 🔄 refresh.
+- Added explicit `console.log` entries for `[CopilotService]` requests, HTTP response statuses, and parsed model definitions for DevTools debugging.
+
 ## 0.6.12
 
 Expand Copilot model options & add dynamic model fetching:

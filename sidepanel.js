@@ -153,6 +153,7 @@ const state = {
   catalogData: null,
   activeSystemContext: '',
   copilotConnected: false,
+  copilotModels: [],
   copilotDeviceCode: null,
   copilotPollingTimer: null,
 };
@@ -311,9 +312,45 @@ async function fetchLocalModels() {
   }
 }
 
+async function fetchRemoteCopilotModels() {
+  if (!state.copilotConnected) {
+    state.copilotModels = [];
+    renderModelOptions();
+    return;
+  }
+
+  try {
+    const tokenRes = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'GET_OR_REFRESH_COPILOT_TOKEN', forceRefresh: false }, resolve);
+    });
+
+    if (!tokenRes || !tokenRes.success || !tokenRes.token) {
+      state.copilotModels = [];
+      renderModelOptions();
+      return;
+    }
+
+    const Copilot = globalThis.__WebMCPCopilotService;
+    if (Copilot && typeof Copilot.fetchCopilotModels === 'function') {
+      const endpointUrl = tokenRes.endpoints && tokenRes.endpoints.api
+        ? (tokenRes.endpoints.api.replace(/\/$/, '') + '/models')
+        : undefined;
+
+      const dynamicModels = await Copilot.fetchCopilotModels(tokenRes.token, endpointUrl);
+      console.log('[Sidepanel] Dynamic Copilot models updated:', dynamicModels);
+      state.copilotModels = Array.isArray(dynamicModels) ? dynamicModels : [];
+    }
+  } catch (err) {
+    console.warn('[Sidepanel] Failed to fetch Copilot models:', err);
+    state.copilotModels = [];
+  }
+  renderModelOptions();
+}
+
 function renderModelOptions(placeholder) {
   els.modelSelect.textContent = '';
-  const copilotModels = (globalThis.__WebMCPCopilotService && globalThis.__WebMCPCopilotService.DEFAULT_MODELS) || [];
+  const copilotModels = state.copilotModels || [];
+
   const hasCopilot = state.copilotConnected && copilotModels.length > 0;
   const hasOllama = state.models.length > 0;
 
@@ -345,7 +382,7 @@ function renderModelOptions(placeholder) {
     for (const model of state.models) {
       const gb = model.size ? ' · ' + (model.size / 1e9).toFixed(1) + ' GB' : '';
       const tools = model.capabilities.includes('tools') ? ' · tools' : '';
-      els.modelSelect.appendChild(new Option(model.name + gb + tools, model.name));
+      ollamaGroup.appendChild(new Option(model.name + gb + tools, model.name));
     }
   } else if (hasCopilot) {
     for (const model of copilotModels) {
@@ -1883,7 +1920,10 @@ els.input.addEventListener('keydown', (event) => {
 });
 els.send.addEventListener('click', sendMessage);
 
-els.refreshModels.addEventListener('click', fetchLocalModels);
+els.refreshModels.addEventListener('click', async () => {
+  await fetchRemoteCopilotModels();
+  await fetchLocalModels();
+});
 els.modelSelect.addEventListener('change', () => {
   state.model = els.modelSelect.value;
   chrome.storage.local.set({ selectedModel: state.model });
@@ -2004,7 +2044,11 @@ async function checkCopilotStatus() {
   const stored = await chrome.storage.local.get(['github_oauth_token', 'copilot_session_token']);
   state.copilotConnected = Boolean(stored.github_oauth_token && stored.copilot_session_token);
   renderCopilotStatus();
-  renderModelOptions();
+  if (state.copilotConnected) {
+    await fetchRemoteCopilotModels();
+  } else {
+    renderModelOptions();
+  }
 }
 
 async function startCopilotFlow() {
@@ -2076,7 +2120,7 @@ function pollCopilotFlow(deviceCode, intervalSec) {
     cancelCopilotFlow();
     state.copilotConnected = true;
     renderCopilotStatus();
-    renderModelOptions();
+    await fetchRemoteCopilotModels();
     fetchLocalModels();
   }, intervalSec * 1000);
 }
@@ -2086,6 +2130,7 @@ async function disconnectCopilot() {
     chrome.runtime.sendMessage({ type: 'REVOKE_COPILOT_AUTH' }, resolve);
   });
   state.copilotConnected = false;
+  state.copilotModels = [];
   renderCopilotStatus();
   renderModelOptions();
 }
