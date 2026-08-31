@@ -1015,4 +1015,34 @@ body {
   color: var(--accent-text);
 }
 
+.logs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.logs-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.logs-output {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 250px;
+  max-height: calc(100vh - 180px);
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0d0e15;
+  color: #a7f3d0;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-y: auto;
+}
+
 

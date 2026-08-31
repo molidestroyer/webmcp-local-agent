@@ -40,6 +40,7 @@
     <button class="tab" role="tab" type="button" data-tab="tools">🧰 Tools</button>
     <button class="tab" role="tab" type="button" data-tab="execute">▶ Execute</button>
     <button class="tab" role="tab" type="button" data-tab="history">📜 History</button>
+    <button class="tab" role="tab" type="button" data-tab="logs">🐞 Logs</button>
     <button class="tab" role="tab" type="button" data-tab="settings">⚙️ Settings</button>
   </nav>
 
@@ -250,6 +251,18 @@
           <div id="copilot-error-msg" class="setting-error" hidden></div>
         </div>
       </div>
+    </section>
+
+    <!-- --------------------------------------------------------------- Logs -->
+    <section id="tab-logs" class="pane" role="tabpanel">
+      <div class="logs-header">
+        <span class="field-label">Diagnostic Logs & API Calls</span>
+        <div class="logs-actions">
+          <button id="logs-copy-btn" class="btn-small" type="button">📋 Copy Logs</button>
+          <button id="logs-clear-btn" class="btn-small btn-cancel" type="button">🗑 Clear</button>
+        </div>
+      </div>
+      <pre id="logs-output" class="logs-output" spellcheck="false">WebMCP Local Agent diagnostic logs initialized...</pre>
     </section>
   </main>
 

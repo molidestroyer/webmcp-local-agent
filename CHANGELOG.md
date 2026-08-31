@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.16
+
+Fix Ollama rendering ReferenceError & add dedicated 🐞 Logs diagnostic tab:
+- Fixed `ReferenceError: ollamaGroup is not defined` when Copilot is not connected. Local Ollama model dropdown now populates cleanly.
+- Multi-header authorization fallback (`sessionToken` & `oauthToken` with `Bearer` and `token` schemas) for Copilot `/models` fetching.
+- Added a dedicated **🐞 Logs** diagnostic tab in the SidePanel with live real-time console capture, 📋 Copy Logs button, and 🗑 Clear button.
+
+## 0.6.15
+
+Fix ReferenceError when rendering Ollama models:
+- Corrected variable reference in `renderModelOptions()` when appending Ollama options to `els.modelSelect` when Copilot is not connected.
+
 ## 0.6.14
 
 Remove hardcoded Copilot default models:

@@ -102,6 +102,10 @@ const els = {
   copilotCancelBtn: document.getElementById('copilot-cancel-btn'),
   copilotDisconnectBtn: document.getElementById('copilot-disconnect-btn'),
   copilotErrorMsg: document.getElementById('copilot-error-msg'),
+  // logs
+  logsOutput: document.getElementById('logs-output'),
+  logsCopyBtn: document.getElementById('logs-copy-btn'),
+  logsClearBtn: document.getElementById('logs-clear-btn'),
   // tools
   toolsList: document.getElementById('tools-list'),
   toolsEmpty: document.getElementById('tools-empty'),
@@ -336,7 +340,7 @@ async function fetchRemoteCopilotModels() {
         ? (tokenRes.endpoints.api.replace(/\/$/, '') + '/models')
         : undefined;
 
-      const dynamicModels = await Copilot.fetchCopilotModels(tokenRes.token, endpointUrl);
+      const dynamicModels = await Copilot.fetchCopilotModels(tokenRes.token, tokenRes.oauthToken, endpointUrl);
       console.log('[Sidepanel] Dynamic Copilot models updated:', dynamicModels);
       state.copilotModels = Array.isArray(dynamicModels) ? dynamicModels : [];
     }
@@ -382,7 +386,7 @@ function renderModelOptions(placeholder) {
     for (const model of state.models) {
       const gb = model.size ? ' · ' + (model.size / 1e9).toFixed(1) + ' GB' : '';
       const tools = model.capabilities.includes('tools') ? ' · tools' : '';
-      ollamaGroup.appendChild(new Option(model.name + gb + tools, model.name));
+      els.modelSelect.appendChild(new Option(model.name + gb + tools, model.name));
     }
   } else if (hasCopilot) {
     for (const model of copilotModels) {
@@ -2217,3 +2221,59 @@ if (els.copilotCopyCodeBtn) {
   await detectPageTools();
   els.input.focus();
 })();
+
+// --- Logs & Debug System ---------------------------------------------------
+
+const logLines = [];
+
+function appendLog(type, message) {
+  const time = new Date().toLocaleTimeString();
+  const line = `[${time}] [${type}] ${message}\n`;
+  logLines.push(line);
+  if (logLines.length > 300) logLines.shift();
+  if (els.logsOutput) {
+    els.logsOutput.textContent = logLines.join('');
+    els.logsOutput.scrollTop = els.logsOutput.scrollHeight;
+  }
+}
+
+const rawLog = console.log;
+const rawWarn = console.warn;
+const rawError = console.error;
+
+console.log = function (...args) {
+  rawLog.apply(console, args);
+  const msg = args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+  appendLog('INFO', msg);
+};
+
+console.warn = function (...args) {
+  rawWarn.apply(console, args);
+  const msg = args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+  appendLog('WARN', msg);
+};
+
+console.error = function (...args) {
+  rawError.apply(console, args);
+  const msg = args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+  appendLog('ERROR', msg);
+};
+
+if (els.logsCopyBtn) {
+  els.logsCopyBtn.addEventListener('click', () => {
+    if (els.logsOutput) {
+      navigator.clipboard.writeText(els.logsOutput.textContent);
+      els.logsCopyBtn.textContent = '✔ Copied!';
+      setTimeout(() => {
+        if (els.logsCopyBtn) els.logsCopyBtn.textContent = '📋 Copy Logs';
+      }, 1500);
+    }
+  });
+}
+
+if (els.logsClearBtn) {
+  els.logsClearBtn.addEventListener('click', () => {
+    logLines.length = 0;
+    if (els.logsOutput) els.logsOutput.textContent = 'Logs cleared.\n';
+  });
+}

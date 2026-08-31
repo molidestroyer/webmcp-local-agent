@@ -306,6 +306,7 @@ async function getOrRefreshCopilotToken(forceRefresh = false) {
   if (!forceRefresh && stored.copilot_session_token && stored.copilot_token_expires_at && stored.copilot_token_expires_at > (nowSec + 60)) {
     return {
       token: stored.copilot_session_token,
+      oauthToken,
       expires_at: stored.copilot_token_expires_at,
       endpoints: stored.copilot_endpoints || null,
     };
@@ -332,7 +333,7 @@ async function getOrRefreshCopilotToken(forceRefresh = false) {
     copilot_endpoints: endpoints,
   });
 
-  return { token, expires_at: expiresAt, endpoints };
+  return { token, oauthToken, expires_at: expiresAt, endpoints };
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
