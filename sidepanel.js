@@ -123,6 +123,8 @@ const state = {
   messages: [{ role: 'system', content: SYSTEM_PROMPT }],
   history: [],
   tabId: null,
+  tabUrl: '',
+  lastNotedTabId: undefined,
   windowId: null,
   busy: false,
   ollamaOk: false,
@@ -311,6 +313,7 @@ function renderModelOptions(placeholder) {
 async function currentTabId() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   state.tabId = tab ? tab.id : null;
+  state.tabUrl = tab ? tab.url : '';
   return state.tabId;
 }
 
@@ -588,11 +591,11 @@ async function generatePromptSuggestions() {
   }
   if (conversationSummary) {
     prompt += `\nRecent conversation:\n${conversationSummary}\n`;
-    prompt += `\nGiven how the conversation just went, suggest between 1 and 3 short, direct follow-up questions or actions the user might want next, using the tools and context above.`;
+    prompt += `\nGiven how the conversation just went, suggest between 1 and 3 short follow-up messages the user could send next. If the assistant just asked the user for information, suggest a plausible, concrete answer to that question instead of repeating it.`;
   } else {
-    prompt += `\nSuggest between 1 and 3 short, direct user questions or actions that can be requested using these tools and context.`;
+    prompt += `\nSuggest between 1 and 3 short, concrete messages the user could send to start using these tools. Prefer specific example values (names, ids, places, numbers) over a generic restatement of what a tool does.`;
   }
-  prompt += ` Output MUST be ONLY a JSON array of strings, e.g. ["Suggestion 1", "Suggestion 2"]. Do NOT include any markdown code blocks, explanation, or extra text.`;
+  prompt += ` These suggestions become clickable chips that get sent verbatim as the user's own next chat message, so every suggestion MUST be phrased in the user's voice, as something THEY would say to the assistant (e.g. "Create a contact for Ada Lovelace in Spain, DNI 12345678Z, postal code 28001") — NEVER as the assistant asking the user a question (e.g. never "Please provide..." or "Do you want to..."). Output MUST be ONLY a JSON array of strings, e.g. ["Suggestion 1", "Suggestion 2"]. Do NOT include any markdown code blocks, explanation, or extra text.`;
 
   // Logged to History (origin: 'suggestion') so a stuck or failing suggestion
   // call is as visible as a failed tool run — this generates no page tool
@@ -604,6 +607,11 @@ async function generatePromptSuggestions() {
     model: state.model,
     usedConversation: Boolean(conversationSummary),
     usedCatalog: Boolean(state.activeSystemContext),
+    // The exact text sent to Ollama to generate these suggestions — there is
+    // no separate "system prompt" for this call (see ollamaChat body below),
+    // this user-role message is the whole of it. Kept here, not truncated,
+    // so a weird suggestion can be traced back to what actually produced it.
+    prompt,
   };
   const logResult = (ok, output) => {
     recordExecution({ tool: 'suggestions', origin: 'suggestion', args, ok, output, ms: performance.now() - started });
@@ -675,6 +683,27 @@ async function generatePromptSuggestions() {
   }
 }
 
+/**
+ * The chat conversation deliberately survives a tab switch (losing it would
+ * be worse: a lot of real workflows read page A then act on page B). But the
+ * tools available silently change underneath it, so a mid-conversation
+ * switch gets a visible note — both in the transcript and in what the model
+ * sees — instead of the model quietly acting on a different page's tools
+ * than the ones the user was just talking about.
+ */
+function announceTabChangeIfNeeded() {
+  const changed = state.lastNotedTabId !== undefined && state.lastNotedTabId !== state.tabId;
+  state.lastNotedTabId = state.tabId;
+  if (!changed || state.messages.length <= 1) return;
+
+  const label = state.tabUrl || 'this tab';
+  const text = state.tools.length
+    ? `Switched to a different tab (${label}). ${state.tools.length} tool(s) now available here.`
+    : `Switched to a different tab (${label}). This page exposes no WebMCP tools.`;
+  addMessage('note', text);
+  state.messages.push({ role: 'system', content: text });
+}
+
 async function detectPageTools() {
   els.refreshTools.classList.add('is-spinning');
   try {
@@ -689,6 +718,7 @@ async function detectPageTools() {
     renderToolsBadge(state.tabId == null ? 'no tab' : null);
     renderToolsList();
     renderPicker();
+    announceTabChangeIfNeeded();
 
     // If NO tools detected on active page -> clear and hide suggestions completely!
     if (!state.tools || state.tools.length === 0) {
@@ -699,9 +729,8 @@ async function detectPageTools() {
       return;
     }
 
-    // Resolve context using active tab URL and active WebMCP tools
-    const [activeTabObj] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
-    const tabUrl = activeTabObj ? activeTabObj.url : '';
+    // Resolve context using the active tab's URL and its WebMCP tools
+    const tabUrl = state.tabUrl;
 
     if (C) {
       const resolved = C.resolveContext(tabUrl, state.tools, state.catalogData);

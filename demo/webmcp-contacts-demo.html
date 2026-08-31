@@ -114,6 +114,30 @@
       font-size: 11px;
       border: 1px solid #1d4c3c;
     }
+    .contact-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .contact-row:last-child { border-bottom: none; }
+    .contact-row__id {
+      font-family: monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+    .contact-row__del {
+      padding: 3px 9px;
+      border: 1px solid #4a2230;
+      border-radius: 6px;
+      background: #2a1420;
+      color: #f2a5b8;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -176,6 +200,11 @@
   </div>
 
   <div class="card">
+    <h2 style="font-size:16px; margin:0 0 8px;">Contacts (<span id="contacts-count">0</span>)</h2>
+    <div id="contacts-list" class="log-box" style="font-family:inherit;">No contacts yet.</div>
+  </div>
+
+  <div class="card">
     <h2 style="font-size:16px; margin:0 0 8px;">Activity Log</h2>
     <div id="log" class="log-box">Waiting for WebMCP tools registration…
 </div>
@@ -228,6 +257,40 @@
       }
     }
 
+    function renderContactsList() {
+      const box = document.getElementById('contacts-list');
+      document.getElementById('contacts-count').textContent = contacts.length;
+      if (!contacts.length) {
+        box.textContent = 'No contacts yet.';
+        return;
+      }
+      box.textContent = '';
+      for (const c of contacts) {
+        const row = document.createElement('div');
+        row.className = 'contact-row';
+
+        const info = document.createElement('span');
+        info.textContent = `${c.fullName} · ${c.country} · ${c.taxId}`;
+
+        const right = document.createElement('span');
+        right.style.display = 'flex';
+        right.style.alignItems = 'center';
+        right.style.gap = '8px';
+        const idSpan = document.createElement('span');
+        idSpan.className = 'contact-row__id';
+        idSpan.textContent = c.id;
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'contact-row__del';
+        delBtn.textContent = 'Delete';
+        delBtn.onclick = () => { deleteContact({ id: c.id }); renderContactsList(); };
+        right.append(idSpan, delBtn);
+
+        row.append(info, right);
+        box.appendChild(row);
+      }
+    }
+
     function createContact(args) {
       const contact = {
         id: 'CT-' + Math.floor(1000 + Math.random() * 9000),
@@ -240,7 +303,26 @@
       };
       contacts.push(contact);
       log(`CREATED CONTACT: ${JSON.stringify(contact)}`);
+      renderContactsList();
       return { success: true, contact };
+    }
+
+    function listContacts() {
+      log(`LISTED CONTACTS -> ${contacts.length} total`);
+      return { count: contacts.length, results: contacts };
+    }
+
+    function deleteContact(args) {
+      const id = String(args.id || '');
+      const index = contacts.findIndex(c => c.id === id);
+      if (index < 0) {
+        log(`DELETE CONTACT (${id}) -> not found`);
+        return { success: false, error: `No contact with id "${id}".` };
+      }
+      const [removed] = contacts.splice(index, 1);
+      log(`DELETED CONTACT: ${JSON.stringify(removed)}`);
+      renderContactsList();
+      return { success: true, contact: removed };
     }
 
     function searchContact(args) {
@@ -344,6 +426,24 @@
         execute: searchContact
       },
       {
+        name: 'list_contacts',
+        description: 'Lists every contact currently stored, with its id, name, country and tax id.',
+        inputSchema: { type: 'object', properties: {} },
+        execute: listContacts
+      },
+      {
+        name: 'delete_contact',
+        description: 'Deletes a contact by its id (e.g. "CT-1234"). Use list_contacts or search_contact first to find the id.',
+        inputSchema: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', description: 'Contact id, e.g. "CT-1234"' }
+          }
+        },
+        execute: deleteContact
+      },
+      {
         name: 'validate_address',
         description: 'Validates postal code and address formatting for South Africa (ZA), Spain (ES), or Canada (CA).',
         inputSchema: {
@@ -357,6 +457,7 @@
         execute: validateAddress
       }
     ];
+    const contactToolNames = contactTools.map((t) => t.name).join('", "');
 
     // The real native API only implements registerTool() (one call per tool);
     // provideContext() is an older/draft bulk shape some polyfills still offer.
@@ -364,10 +465,10 @@
     // available" on a browser whose real ModelContext only has registerTool.
     if (ctx && typeof ctx.registerTool === 'function') {
       contactTools.forEach((tool) => ctx.registerTool(tool));
-      log('Registered WebMCP tools: "create_contact", "search_contact", "validate_address"');
+      log(`Registered WebMCP tools: "${contactToolNames}"`);
     } else if (ctx && typeof ctx.provideContext === 'function') {
       ctx.provideContext({ tools: contactTools });
-      log('Registered WebMCP tools: "create_contact", "search_contact", "validate_address"');
+      log(`Registered WebMCP tools: "${contactToolNames}"`);
     } else {
       log('WARNING: WebMCP modelContext not available. Reload the page after installing the extension.');
     }

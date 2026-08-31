@@ -9,10 +9,10 @@
         "urlPattern": ".*(\\.za|/za/|region=za).*",
         "requiredTools": ["create_contact"]
       },
-      "systemContext": "Reglas de negocio ZA: Requiere South African ID (13 dígitos) y cálculo de retención UIF/PAYE. Código postal de 4 dígitos.",
+      "systemContext": "ZA business rules: requires a 13-digit South African ID and UIF/PAYE withholding calculation. 4-digit postal code.",
       "suggestedPrompts": [
-        "Crear contacto para Sudáfrica con 13 dígitos ID",
-        "Validar dirección y código postal sudafricano"
+        "Create a contact for South Africa with a 13-digit ID",
+        "Validate a South African address and postal code"
       ]
     },
     {
@@ -22,10 +22,10 @@
         "urlPattern": ".*(\\.es|/es/|region=es).*",
         "requiredTools": ["create_contact"]
       },
-      "systemContext": "Reglas de negocio ES: Requiere documento DNI/NIE/NIF válido y código postal español de 5 dígitos (CP).",
+      "systemContext": "ES business rules: requires a valid DNI/NIE/NIF document and a 5-digit Spanish postal code (CP).",
       "suggestedPrompts": [
-        "Crear contacto para España con DNI/NIF válido",
-        "Validar dirección en España y provincia"
+        "Create a contact for Spain with a valid DNI/NIF",
+        "Validate an address and postal code in Spain"
       ]
     },
     {
@@ -35,10 +35,10 @@
         "urlPattern": ".*(\\.ca|/ca/|region=ca).*",
         "requiredTools": ["create_contact"]
       },
-      "systemContext": "Reglas de negocio CA: Requiere Social Insurance Number (SIN 9 dígitos), código postal alfanumérico (A1A 1A1) e impuesto GST/HST.",
+      "systemContext": "CA business rules: requires a Social Insurance Number (9-digit SIN), an alphanumeric postal code (A1A 1A1), and GST/HST tax.",
       "suggestedPrompts": [
-        "Crear contacto para Canadá con SIN y GST/HST",
-        "Validar formato de código postal canadiense (A1A 1A1)"
+        "Create a contact for Canada with a SIN and GST/HST",
+        "Validate a Canadian postal code format (A1A 1A1)"
       ]
     }
   ]

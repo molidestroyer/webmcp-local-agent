@@ -120,9 +120,10 @@ exercise the origin matching the extension does when resolving a tool.
   — the same tool declared entirely in markup with `<form toolname="...">`; no registration
   code runs, and the Tools panel reports it as an HTML form.
 - **[Multi-country contacts demo](https://molidestroyer.github.io/webmcp-local-agent/webmcp-contacts-demo.html)**
-  — country-aware contact tools (`create_contact`, `search_contact`, `validate_address` for
-  ZA/ES/CA) plus the Knowledge Catalog: switch `?region=` and the Settings tab's Rules
-  Inspector picks up matching business rules and suggested prompts.
+  — country-aware contact tools (`create_contact`, `search_contact`, `list_contacts`,
+  `delete_contact`, `validate_address` for ZA/ES/CA) plus the Knowledge Catalog: switch
+  `?region=` and the Settings tab's Rules Inspector picks up matching business rules and
+  suggested prompts.
 
 The same files ship inside the extension (`demo/`), so you can open them offline too.
 `demo/` is the single source for both — the workflow publishes that folder as-is.
