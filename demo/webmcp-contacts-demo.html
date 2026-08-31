@@ -177,7 +177,8 @@
 
   <div class="card">
     <h2 style="font-size:16px; margin:0 0 8px;">Activity Log</h2>
-    <div id="log" class="log-box">Registered WebMCP tools: "create_contact", "search_contact", "validate_address"\n</div>
+    <div id="log" class="log-box">Waiting for WebMCP tools registration…
+</div>
   </div>
 
   <script>
@@ -244,8 +245,8 @@
 
     function searchContact(args) {
       const query = String(args.query || '').toLowerCase();
-      const results = contacts.filter(c => 
-        c.fullName.toLowerCase().includes(query) || 
+      const results = contacts.filter(c =>
+        c.fullName.toLowerCase().includes(query) ||
         c.taxId.toLowerCase().includes(query) ||
         c.country.toLowerCase().includes(query)
       );
@@ -284,15 +285,37 @@
         address: document.getElementById('address').value
       });
       document.getElementById('contact-form').reset();
-      updateCountryFields();
+      syncRegionUI();
+    }
+
+    // --- Minimal WebMCP polyfill for browsers without the native API ---------
+    // Same pattern as webmcp-demo.html: provide a minimal modelContext shim so
+    // tools are discoverable even when the browser does not ship the API yet.
+    if (!('modelContext' in navigator)) {
+      const registered = [];
+      navigator.modelContext = {
+        get tools() { return registered.slice(); },
+        provideContext(config) {
+          registered.length = 0;
+          if (config && Array.isArray(config.tools)) registered.push(...config.tools);
+        },
+        registerTool(tool) { registered.push(tool); },
+        unregisterTool(name) {
+          const index = registered.findIndex((t) => t.name === name);
+          if (index >= 0) registered.splice(index, 1);
+        },
+        async callTool(name, args) {
+          const tool = registered.find((entry) => entry.name === name);
+          if (!tool) throw new Error('Unknown tool: ' + name);
+          return tool.execute(args);
+        },
+      };
     }
 
     // --- WebMCP Tool Registration -------------------------------------------
-    function registerWebMCPTools() {
-      const context = document.modelContext || window.modelContext;
-      if (!context || typeof context.provideContext !== 'function') return;
-
-      context.provideContext({
+    const ctx = document.modelContext || navigator.modelContext || window.modelContext;
+    if (ctx && typeof ctx.provideContext === 'function') {
+      ctx.provideContext({
         tools: [
           {
             name: 'create_contact',
@@ -337,12 +360,12 @@
           }
         ]
       });
+      log('Registered WebMCP tools: "create_contact", "search_contact", "validate_address"');
+    } else {
+      log('WARNING: WebMCP modelContext not available. Reload the page after installing the extension.');
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
-      syncRegionUI();
-      registerWebMCPTools();
-    });
+    syncRegionUI();
   </script>
 </body>
 </html>
