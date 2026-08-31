@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.6
+
+Fix tool registration on browsers whose real native WebMCP API only implements `registerTool()`:
+- `webmcp-demo.html` and `webmcp-contacts-demo.html` unconditionally called `modelContext.provideContext({ tools })` — a bulk, older/draft-era shape. On a browser with the real native API (confirmed via a user's `document.modelContext` dump: a genuine `ModelContext` instance exposing `registerTool`/`ontoolchange` but no `provideContext`), that call is simply absent, so nothing ever registered and the contacts demo logged "WebMCP modelContext not available" despite the extension working correctly. `webmcp-native-demo.html` was unaffected — it already used `registerTool()` per tool, which is why other pages "just worked" for the same user. Both fixed pages now call `registerTool()` once per tool when available, falling back to `provideContext()` only for polyfills/drafts that lack `registerTool()`.
+- Verified against a synthetic native object shaped exactly like the reported one (`registerTool` + `ontoolchange`, no `provideContext`) with `page-hook.js` attached for real: registration and discovery now succeed.
+- `#clear-chat` (🗑) now matches `#send`'s footprint (36×36) instead of shrinking to its own padding — the two composer actions read as a pair.
+- README: linked each of the four hosted demo pages individually (the contacts demo was missing entirely; the imperative demo's snippet cited `provideContext`, corrected to `registerTool`).
+
 ## 0.6.5
 
 Make suggestions actually follow the tool-discovery and conversation lifecycle, not just settle once at load:
