@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.7
+
+Fix suggestions being phrased as assistant questions, add tab-switch awareness, richer History debugging, and a fuller contacts demo:
+- The AI-suggestion prompt never told the model these strings get sent verbatim as the *user's own* next chat message — the model was phrasing them as itself asking the user for input ("Please provide...", "Do you want to..."). The prompt now says so explicitly and asks for concrete example values instead of generic restatements of a tool's description.
+- History entries for suggestion generation (`suggestion` origin) now include the exact prompt text sent to Ollama, so a weird suggestion can be traced back to what produced it.
+- Switching Chrome tabs mid-conversation no longer silently swaps the tools available under an unchanged chat: a visible note (and a matching system message in the model's context) marks the tab change and the new tool count, and the conversation itself is kept — clearing it on every tab switch would break workflows that read one page and act on another.
+- `webmcp-contacts-demo.html`: added `list_contacts` and `delete_contact` tools, plus a live contact list in the page (with its own Delete button) so create/list/delete are all visible without reading the log.
+- `demo/catalog-sample.json`'s `suggestedPrompts` and `systemContext` were still in Spanish from before the English-only pass — translated.
+
 ## 0.6.6
 
 Fix tool registration on browsers whose real native WebMCP API only implements `registerTool()`:
