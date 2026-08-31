@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1
+
+Add Knowledge & Business Rule Catalog System with Local / Remote sources, Rules Inspector UI, and Multi-Country Demo:
+- Dual source mode: Built-in Local Sample Catalog (`demo/catalog-sample.json`) vs Custom Remote URL (Public or Private repo with Bearer Token auth).
+- Active Rules Inspector in Settings tab (`#catalog-rules-list`) displaying loaded rules, match criteria (`urlPattern`, `requiredTools`), business `systemContext`, and static `suggestedPrompts`.
+- Enriched Ollama system prompts with active region/page business rules on chat turns and dynamic AI prompt generation.
+- New Interactive Multi-Country Contact Agenda demo (`demo/webmcp-contacts-demo.html`) supporting ZA (13-digit ID), ES (DNI/NIF), and CA (SIN & postal code).
+
 ## 0.6.0
 
 Add Settings tab and dynamic prompt suggestions based on WebMCP tools:

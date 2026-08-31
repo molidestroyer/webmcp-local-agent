@@ -77,6 +77,16 @@ const els = {
   suggestionsChips: document.getElementById('suggestions-chips'),
   // settings
   autoSuggestToggle: document.getElementById('auto-suggest-toggle'),
+  catalogSourceLocal: document.getElementById('catalog-source-local'),
+  catalogSourceRemote: document.getElementById('catalog-source-remote'),
+  catalogRemoteFields: document.getElementById('catalog-remote-fields'),
+  catalogUrl: document.getElementById('catalog-url'),
+  catalogToken: document.getElementById('catalog-token'),
+  catalogSyncBtn: document.getElementById('catalog-sync-btn'),
+  catalogStatusBadge: document.getElementById('catalog-status-badge'),
+  catalogStatusMeta: document.getElementById('catalog-status-meta'),
+  catalogRulesCount: document.getElementById('catalog-rules-count'),
+  catalogRulesList: document.getElementById('catalog-rules-list'),
   // tools
   toolsList: document.getElementById('tools-list'),
   toolsEmpty: document.getElementById('tools-empty'),
@@ -117,7 +127,13 @@ const state = {
   ollamaOk: false,
   autoSuggest: false,
   suggesting: false,
-  suggestions: [],
+  staticSuggestions: [],
+  aiSuggestions: [],
+  catalogSourceMode: 'local',
+  catalogUrl: '',
+  catalogToken: '',
+  catalogData: null,
+  activeSystemContext: '',
 };
 
 // --- Generic helpers -------------------------------------------------------
@@ -311,9 +327,134 @@ async function bridge(action, payload) {
   }
 }
 
-// --- Prompt suggestions ---------------------------------------------------
+// --- Catalog & Prompt suggestions ----------------------------------------
 
+const C = globalThis.__WebMCPCatalogService;
 let suggestAbortController = null;
+
+function renderCatalogRulesInspector() {
+  if (!els.catalogRulesList) return;
+  els.catalogRulesList.textContent = '';
+
+  const catalog = state.catalogData || (C ? C.DEFAULT_LOCAL_CATALOG : null);
+  const rules = catalog && Array.isArray(catalog.rules) ? catalog.rules : [];
+
+  if (els.catalogRulesCount) {
+    els.catalogRulesCount.textContent = rules.length === 1 ? '1 regla' : rules.length + ' reglas';
+  }
+
+  if (!rules.length) {
+    const empty = document.createElement('div');
+    empty.className = 'pane__empty';
+    empty.textContent = 'No hay reglas cargadas en el catálogo.';
+    els.catalogRulesList.appendChild(empty);
+    return;
+  }
+
+  for (const rule of rules) {
+    const card = document.createElement('div');
+    card.className = 'rule-card';
+
+    const title = document.createElement('div');
+    title.className = 'rule-card__title';
+    title.textContent = `${rule.name || 'Sin nombre'} (${rule.id || 'sin-id'})`;
+
+    const match = document.createElement('div');
+    match.className = 'rule-card__match';
+    const urlPat = rule.match && rule.match.urlPattern ? `URL: ${rule.match.urlPattern}` : '';
+    const reqTools = rule.match && Array.isArray(rule.match.requiredTools) && rule.match.requiredTools.length
+      ? `Tools: ${rule.match.requiredTools.join(', ')}`
+      : '';
+    match.textContent = [urlPat, reqTools].filter(Boolean).join(' | ') || 'Sin criterio de filtro';
+
+    const ctx = document.createElement('div');
+    ctx.className = 'rule-card__ctx';
+    ctx.textContent = rule.systemContext || 'Sin reglas de negocio (systemContext)';
+
+    card.append(title, match, ctx);
+    els.catalogRulesList.appendChild(card);
+  }
+}
+
+async function syncCatalog() {
+  if (!C) return;
+  const isRemote = els.catalogSourceRemote && els.catalogSourceRemote.checked;
+  state.catalogSourceMode = isRemote ? 'remote' : 'local';
+
+  if (!isRemote) {
+    state.catalogData = C.DEFAULT_LOCAL_CATALOG;
+    if (els.catalogStatusBadge) {
+      els.catalogStatusBadge.className = 'chip chip--ok';
+      els.catalogStatusBadge.textContent = 'Catálogo Local Activo';
+    }
+    if (els.catalogStatusMeta) {
+      els.catalogStatusMeta.textContent = `${C.DEFAULT_LOCAL_CATALOG.rules.length} reglas incorporadas`;
+    }
+    renderCatalogRulesInspector();
+    await chrome.storage.local.set({
+      catalogSourceMode: 'local',
+      webmcp_catalog_cache: state.catalogData,
+    });
+    detectPageTools();
+    return;
+  }
+
+  const url = els.catalogUrl ? els.catalogUrl.value.trim() : '';
+  const token = els.catalogToken ? els.catalogToken.value.trim() : '';
+  state.catalogUrl = url;
+  state.catalogToken = token;
+
+  if (!url) {
+    if (els.catalogStatusBadge) {
+      els.catalogStatusBadge.className = 'chip chip--err';
+      els.catalogStatusBadge.textContent = 'URL Requerida';
+    }
+    if (els.catalogStatusMeta) els.catalogStatusMeta.textContent = 'Introduce la URL del catálogo JSON';
+    return;
+  }
+
+  if (els.catalogSyncBtn) {
+    els.catalogSyncBtn.disabled = true;
+    els.catalogSyncBtn.textContent = 'Sincronizando…';
+  }
+
+  try {
+    const res = await C.fetchCatalog(url, token);
+    if (!res.ok) {
+      if (els.catalogStatusBadge) {
+        els.catalogStatusBadge.className = 'chip chip--err';
+        els.catalogStatusBadge.textContent = 'Error de Sincronización';
+      }
+      if (els.catalogStatusMeta) els.catalogStatusMeta.textContent = res.error;
+      return;
+    }
+
+    state.catalogData = res.data;
+    const ruleCount = state.catalogData.rules.length;
+    if (els.catalogStatusBadge) {
+      els.catalogStatusBadge.className = 'chip chip--ok';
+      els.catalogStatusBadge.textContent = 'Catálogo Remoto Sincronizado';
+    }
+    if (els.catalogStatusMeta) {
+      const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      els.catalogStatusMeta.textContent = `✔ Sincronizado a las ${nowStr} · ${ruleCount} reglas`;
+    }
+
+    renderCatalogRulesInspector();
+    await chrome.storage.local.set({
+      catalogSourceMode: 'remote',
+      catalogUrl: url,
+      catalogToken: token,
+      webmcp_catalog_cache: state.catalogData,
+    });
+    detectPageTools();
+  } finally {
+    if (els.catalogSyncBtn) {
+      els.catalogSyncBtn.disabled = false;
+      els.catalogSyncBtn.textContent = '🔄 Sync Catalog Now';
+    }
+  }
+}
 
 function clearSuggestions() {
   if (suggestAbortController) {
@@ -321,18 +462,18 @@ function clearSuggestions() {
     suggestAbortController = null;
   }
   state.suggesting = false;
-  state.suggestions = [];
-  if (els.suggestions) {
-    els.suggestions.hidden = true;
-    if (els.suggestionsLoading) els.suggestionsLoading.hidden = true;
-    if (els.suggestionsChips) els.suggestionsChips.textContent = '';
-  }
+  state.aiSuggestions = [];
+  renderSuggestions();
 }
 
 function renderSuggestions() {
   if (!els.suggestionsChips) return;
   els.suggestionsChips.textContent = '';
-  if (!state.suggestions.length) {
+
+  const hasStatic = state.staticSuggestions && state.staticSuggestions.length > 0;
+  const hasAI = state.aiSuggestions && state.aiSuggestions.length > 0;
+
+  if (!hasStatic && !hasAI) {
     if (els.suggestions) els.suggestions.hidden = true;
     return;
   }
@@ -340,18 +481,38 @@ function renderSuggestions() {
   if (els.suggestions) els.suggestions.hidden = false;
   if (els.suggestionsLoading) els.suggestionsLoading.hidden = !state.suggesting;
 
-  for (const text of state.suggestions) {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'chip-suggestion';
-    chip.textContent = '💡 ' + text;
-    chip.addEventListener('click', () => {
-      els.input.value = text;
-      autoGrow();
-      updateSendState();
-      sendMessage();
-    });
-    els.suggestionsChips.appendChild(chip);
+  // Static prompts from Catalog (blue chip)
+  if (hasStatic) {
+    for (const text of state.staticSuggestions) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip-suggestion chip-suggestion--static';
+      chip.textContent = '📌 ' + text;
+      chip.addEventListener('click', () => {
+        els.input.value = text;
+        autoGrow();
+        updateSendState();
+        sendMessage();
+      });
+      els.suggestionsChips.appendChild(chip);
+    }
+  }
+
+  // AI Generated Prompts (purple chip)
+  if (hasAI) {
+    for (const text of state.aiSuggestions) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip-suggestion chip-suggestion--ai';
+      chip.textContent = '✨ ' + text;
+      chip.addEventListener('click', () => {
+        els.input.value = text;
+        autoGrow();
+        updateSendState();
+        sendMessage();
+      });
+      els.suggestionsChips.appendChild(chip);
+    }
   }
 }
 
@@ -372,7 +533,11 @@ async function generatePromptSuggestions() {
   if (els.suggestionsLoading) els.suggestionsLoading.hidden = false;
 
   const toolSummary = state.tools.map((t) => `- ${t.name}: ${t.description || 'No description'}`).join('\n');
-  const prompt = `Available page tools:\n${toolSummary}\n\nSuggest between 1 and 3 short, direct user questions or actions that can be requested using these tools. Output MUST be ONLY a JSON array of strings, e.g. ["Suggestion 1", "Suggestion 2"]. Do NOT include any markdown code blocks, explanation, or extra text.`;
+  let prompt = `Available page tools:\n${toolSummary}\n`;
+  if (state.activeSystemContext) {
+    prompt += `\nBusiness rules and context:\n${state.activeSystemContext}\n`;
+  }
+  prompt += `\nSuggest between 1 and 3 short, direct user questions or actions that can be requested using these tools and context. Output MUST be ONLY a JSON array of strings, e.g. ["Suggestion 1", "Suggestion 2"]. Do NOT include any markdown code blocks, explanation, or extra text.`;
 
   try {
     const response = await fetch(state.host + '/api/chat', {
@@ -425,7 +590,7 @@ async function generatePromptSuggestions() {
       return;
     }
 
-    state.suggestions = validSuggestions;
+    state.aiSuggestions = validSuggestions;
     renderSuggestions();
   } catch (err) {
     if (err && err.name === 'AbortError') return;
@@ -444,8 +609,6 @@ async function detectPageTools() {
     const failed = !answer || answer.error;
     state.tools = failed ? [] : S.toolsFromListing(answer.result);
 
-    // A page whose getTools() throws looks identical to one with no tools,
-    // which is how declarative tools went missing without a word.
     const problems = failed ? [] : S.listingErrors(answer.result);
     if (problems.length) showStatus('Reading the page tools failed: ' + problems.join(' | '));
 
@@ -453,10 +616,26 @@ async function detectPageTools() {
     renderToolsList();
     renderPicker();
 
+    // Resolve context using active tab URL and active WebMCP tools
+    const [activeTabObj] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+    const tabUrl = activeTabObj ? activeTabObj.url : '';
+
+    if (C) {
+      const resolved = C.resolveContext(tabUrl, state.tools, state.catalogData);
+      state.activeSystemContext = resolved.systemContext;
+      state.staticSuggestions = resolved.suggestedPrompts;
+    } else {
+      state.activeSystemContext = '';
+      state.staticSuggestions = [];
+    }
+
+    renderSuggestions();
+
     if (state.autoSuggest && state.tools.length > 0 && state.ollamaOk && state.model && !state.busy) {
       generatePromptSuggestions();
-    } else if (!state.tools.length || !state.autoSuggest) {
-      clearSuggestions();
+    } else if (!state.autoSuggest) {
+      state.aiSuggestions = [];
+      renderSuggestions();
     }
   } finally {
     els.refreshTools.classList.remove('is-spinning');
@@ -1488,6 +1667,20 @@ if (els.autoSuggestToggle) {
   });
 }
 
+if (els.catalogSourceLocal && els.catalogSourceRemote) {
+  const toggleSourceFields = () => {
+    const isRemote = els.catalogSourceRemote.checked;
+    if (els.catalogRemoteFields) els.catalogRemoteFields.hidden = !isRemote;
+    syncCatalog();
+  };
+  els.catalogSourceLocal.addEventListener('change', toggleSourceFields);
+  els.catalogSourceRemote.addEventListener('change', toggleSourceFields);
+}
+
+if (els.catalogSyncBtn) {
+  els.catalogSyncBtn.addEventListener('click', syncCatalog);
+}
+
 els.refreshTools.addEventListener('click', detectPageTools);
 els.toolsBadge.addEventListener('click', () => setTab('tools'));
 
@@ -1551,10 +1744,42 @@ chrome.runtime.onMessage.addListener((message) => {
     state.windowId = window_ ? window_.id : null;
   } catch (_) { /* fall back to reacting to every window */ }
 
-  const stored = await chrome.storage.local.get(['confirmTools', 'activeTab', 'autoSuggest']);
+  const stored = await chrome.storage.local.get([
+    'confirmTools',
+    'activeTab',
+    'autoSuggest',
+    'catalogSourceMode',
+    'catalogUrl',
+    'catalogToken',
+    'webmcp_catalog_cache',
+  ]);
+
   els.confirmTools.checked = Boolean(stored.confirmTools);
   state.autoSuggest = Boolean(stored.autoSuggest);
   if (els.autoSuggestToggle) els.autoSuggestToggle.checked = state.autoSuggest;
+
+  state.catalogSourceMode = stored.catalogSourceMode || 'local';
+  state.catalogUrl = stored.catalogUrl || '';
+  state.catalogToken = stored.catalogToken || '';
+
+  if (els.catalogSourceRemote && state.catalogSourceMode === 'remote') {
+    els.catalogSourceRemote.checked = true;
+    if (els.catalogRemoteFields) els.catalogRemoteFields.hidden = false;
+  } else if (els.catalogSourceLocal) {
+    els.catalogSourceLocal.checked = true;
+    if (els.catalogRemoteFields) els.catalogRemoteFields.hidden = true;
+  }
+
+  if (els.catalogUrl) els.catalogUrl.value = state.catalogUrl;
+  if (els.catalogToken) els.catalogToken.value = state.catalogToken;
+
+  if (stored.webmcp_catalog_cache) {
+    state.catalogData = stored.webmcp_catalog_cache;
+  } else if (C) {
+    state.catalogData = C.DEFAULT_LOCAL_CATALOG;
+  }
+
+  renderCatalogRulesInspector();
   setTab(stored.activeTab || 'chat');
 
   await loadHistory();

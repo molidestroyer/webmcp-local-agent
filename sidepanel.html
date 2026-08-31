@@ -127,17 +127,64 @@
 
     <!-- ------------------------------------------------------------ Settings -->
     <section id="tab-settings" class="pane" role="tabpanel">
+      <!-- Group 1: AI Prompt Suggestions -->
       <div class="setting-card">
-        <div class="field-label">Suggestions / Sugerencias</div>
+        <div class="field-label">AI Prompt Suggestions / Sugerencias IA</div>
         <label class="setting-item" title="Genera sugerencias automáticas de preguntas según las herramientas detectadas">
           <input type="checkbox" id="auto-suggest-toggle">
           <div class="setting-item__text">
             <span class="setting-item__title">Habilitar prompts sugeridos automáticos</span>
             <span class="setting-item__desc">
-              Genera de 1 a 3 sugerencias de preguntas basadas en las herramientas WebMCP detectadas en la página activa usando el modelo Ollama seleccionado.
+              Genera sugerencias dinámicas con el modelo Ollama basándose en las herramientas detectadas y las reglas de negocio del catálogo activo.
             </span>
           </div>
         </label>
+      </div>
+
+      <!-- Group 2: Knowledge & Business Rules Catalog -->
+      <div class="setting-card">
+        <div class="field-label">Knowledge & Prompt Catalog / Catálogo de Reglas</div>
+
+        <div class="setting-group-mode">
+          <label class="setting-radio">
+            <input type="radio" name="catalog-source" value="local" id="catalog-source-local" checked>
+            <span>Ejemplo Local Incorporado (Local Sample)</span>
+          </label>
+          <label class="setting-radio">
+            <input type="radio" name="catalog-source" value="remote" id="catalog-source-remote">
+            <span>URL Remota (GitHub Raw / PAT / Enterprise)</span>
+          </label>
+        </div>
+
+        <div id="catalog-remote-fields" class="tool-form" hidden>
+          <div class="tool-form__field">
+            <label for="catalog-url">Catalog Source URL</label>
+            <input type="url" id="catalog-url" placeholder="https://raw.githubusercontent.com/user/repo/main/catalog.json">
+            <span class="hint">Admite JSON raw público o endpoints privados (GitHub, GitLab, Azure DevOps).</span>
+          </div>
+
+          <div class="tool-form__field">
+            <label for="catalog-token">Auth Token / PAT (Opcional)</label>
+            <input type="password" id="catalog-token" placeholder="ghp_... o Bearer Token">
+            <span class="hint">Para repositorios privados o GitHub Enterprise (Bearer Header).</span>
+          </div>
+
+          <button id="catalog-sync-btn" class="btn-wide" type="button">🔄 Sync Catalog Now</button>
+        </div>
+
+        <div id="catalog-status" class="catalog-status">
+          <span id="catalog-status-badge" class="chip chip--ok">Catálogo Local Activo</span>
+          <span id="catalog-status-meta" class="hint">3 reglas de negocio cargadas</span>
+        </div>
+      </div>
+
+      <!-- Group 3: Catalog Rules Inspector / Visualizador del Catálogo -->
+      <div class="setting-card">
+        <div class="field-label field-label--row">
+          <span>Active Rules Inspector / Visualizador del Catálogo</span>
+          <span id="catalog-rules-count" class="hint">3 reglas</span>
+        </div>
+        <div id="catalog-rules-list" class="catalog-rules-list"></div>
       </div>
     </section>
   </main>
@@ -168,6 +215,7 @@
   </footer>
 
   <script src="lib/webmcp-schema.js"></script>
+  <script src="lib/catalog-service.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

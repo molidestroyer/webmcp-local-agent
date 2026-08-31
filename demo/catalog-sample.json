@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "description": "WebMCP Business Rules & Prompt Catalog Sample for Multi-Country Address Book",
+  "rules": [
+    {
+      "id": "contacts-za",
+      "name": "South Africa Localization (ZA)",
+      "match": {
+        "urlPattern": ".*(\\.za|/za/|region=za).*",
+        "requiredTools": ["create_contact"]
+      },
+      "systemContext": "Reglas de negocio ZA: Requiere South African ID (13 dígitos) y cálculo de retención UIF/PAYE. Código postal de 4 dígitos.",
+      "suggestedPrompts": [
+        "Crear contacto para Sudáfrica con 13 dígitos ID",
+        "Validar dirección y código postal sudafricano"
+      ]
+    },
+    {
+      "id": "contacts-es",
+      "name": "Spain Localization (ES)",
+      "match": {
+        "urlPattern": ".*(\\.es|/es/|region=es).*",
+        "requiredTools": ["create_contact"]
+      },
+      "systemContext": "Reglas de negocio ES: Requiere documento DNI/NIE/NIF válido y código postal español de 5 dígitos (CP).",
+      "suggestedPrompts": [
+        "Crear contacto para España con DNI/NIF válido",
+        "Validar dirección en España y provincia"
+      ]
+    },
+    {
+      "id": "contacts-ca",
+      "name": "Canada Localization (CA)",
+      "match": {
+        "urlPattern": ".*(\\.ca|/ca/|region=ca).*",
+        "requiredTools": ["create_contact"]
+      },
+      "systemContext": "Reglas de negocio CA: Requiere Social Insurance Number (SIN 9 dígitos), código postal alfanumérico (A1A 1A1) e impuesto GST/HST.",
+      "suggestedPrompts": [
+        "Crear contacto para Canadá con SIN y GST/HST",
+        "Validar formato de código postal canadiense (A1A 1A1)"
+      ]
+    }
+  ]
+}

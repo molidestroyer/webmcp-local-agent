@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Multi-Country Contacts & Knowledge Catalog Demo — WebMCP Local Agent</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f0f17;
+      --card: #171726;
+      --card-2: #1c1c2e;
+      --border: #262637;
+      --accent: #8b5cf6;
+      --accent-soft: #2a2145;
+      --accent-text: #c4b5fd;
+      --text: #e8e8f2;
+      --text-dim: #8f8fa8;
+      --green: #10b981;
+    }
+    body {
+      max-width: 800px;
+      margin: 30px auto;
+      padding: 0 20px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      line-height: 1.5;
+    }
+    a { color: var(--accent-text); }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    p { margin: 0 0 12px; color: var(--text-dim); }
+    .region-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--card);
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+    .region-btn {
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--card-2);
+      color: var(--text);
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .region-btn.is-active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent-text);
+      font-weight: 600;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 14px;
+    }
+    label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+    input, select {
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+      font: inherit;
+      font-size: 13.5px;
+    }
+    button.btn-primary {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .log-box {
+      background: #10101c;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #0f2b23;
+      color: var(--green);
+      font-size: 11px;
+      border: 1px solid #1d4c3c;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📇 Multi-Country Contacts & Knowledge Catalog Demo</h1>
+    <p>
+      This demo exposes WebMCP tools for creating and searching contacts across different countries.
+      Open the extension panel to see <strong>Knowledge Catalog Rules</strong> automatically match your region!
+    </p>
+    <a href="index.html">← Back to Demos</a>
+  </header>
+
+  <div class="region-bar">
+    <span>Select Active Region:</span>
+    <button type="button" class="region-btn" id="btn-za" onclick="setRegion('za')">🇿🇦 South Africa (?region=za)</button>
+    <button type="button" class="region-btn" id="btn-es" onclick="setRegion('es')">🇪🇸 Spain (?region=es)</button>
+    <button type="button" class="region-btn" id="btn-ca" onclick="setRegion('ca')">🇨🇦 Canada (?region=ca)</button>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+      <h2 style="font-size:16px; margin:0;">Create New Contact</h2>
+      <span id="registered-badge" class="badge">WebMCP Tools Registered</span>
+    </div>
+
+    <form id="contact-form" onsubmit="handleManualSubmit(event)">
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label for="fullName">Full Name</label>
+          <input type="text" id="fullName" placeholder="e.g. Nelson Mandela" required>
+        </div>
+        <div class="form-group">
+          <label for="country">Country</label>
+          <select id="country" onchange="updateCountryFields()">
+            <option value="ZA">South Africa (ZA)</option>
+            <option value="ES">Spain (ES)</option>
+            <option value="CA">Canada (CA)</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label id="taxIdLabel" for="taxId">National ID / Tax ID</label>
+          <input type="text" id="taxId" placeholder="13-digit SA ID, DNI, or SIN" required>
+        </div>
+        <div class="form-group">
+          <label id="postalCodeLabel" for="postalCode">Postal Code</label>
+          <input type="text" id="postalCode" placeholder="e.g. 0001 or 28001" required>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="address">Street Address</label>
+        <input type="text" id="address" placeholder="e.g. 100 Main Street">
+      </div>
+
+      <button type="submit" class="btn-primary">Add Contact</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:16px; margin:0 0 8px;">Activity Log</h2>
+    <div id="log" class="log-box">Registered WebMCP tools: "create_contact", "search_contact", "validate_address"\n</div>
+  </div>
+
+  <script>
+    const contacts = [];
+
+    function log(msg) {
+      const box = document.getElementById('log');
+      box.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function setRegion(reg) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('region', reg);
+      window.location.href = url.toString();
+    }
+
+    function syncRegionUI() {
+      const params = new URLSearchParams(window.location.search);
+      const region = (params.get('region') || 'za').toLowerCase();
+      document.querySelectorAll('.region-btn').forEach(b => b.classList.remove('is-active'));
+      const activeBtn = document.getElementById('btn-' + region);
+      if (activeBtn) activeBtn.classList.add('is-active');
+
+      const countrySelect = document.getElementById('country');
+      if (region === 'za') countrySelect.value = 'ZA';
+      else if (region === 'es') countrySelect.value = 'ES';
+      else if (region === 'ca') countrySelect.value = 'CA';
+
+      updateCountryFields();
+    }
+
+    function updateCountryFields() {
+      const country = document.getElementById('country').value;
+      const taxLabel = document.getElementById('taxIdLabel');
+      const zipLabel = document.getElementById('postalCodeLabel');
+
+      if (country === 'ZA') {
+        taxLabel.textContent = 'South African ID (13 Digits)';
+        zipLabel.textContent = 'Postal Code (4 Digits)';
+      } else if (country === 'ES') {
+        taxLabel.textContent = 'DNI / NIE / NIF';
+        zipLabel.textContent = 'Código Postal (5 Digitos)';
+      } else if (country === 'CA') {
+        taxLabel.textContent = 'Social Insurance Number (SIN 9 Digits)';
+        zipLabel.textContent = 'Postal Code (e.g. A1A 1A1)';
+      }
+    }
+
+    function createContact(args) {
+      const contact = {
+        id: 'CT-' + Math.floor(1000 + Math.random() * 9000),
+        fullName: args.fullName || 'Unnamed',
+        country: args.country || 'ZA',
+        taxId: args.taxId || '',
+        postalCode: args.postalCode || '',
+        address: args.address || '',
+        createdAt: new Date().toISOString()
+      };
+      contacts.push(contact);
+      log(`CREATED CONTACT: ${JSON.stringify(contact)}`);
+      return { success: true, contact };
+    }
+
+    function searchContact(args) {
+      const query = String(args.query || '').toLowerCase();
+      const results = contacts.filter(c => 
+        c.fullName.toLowerCase().includes(query) || 
+        c.taxId.toLowerCase().includes(query) ||
+        c.country.toLowerCase().includes(query)
+      );
+      log(`SEARCHED CONTACTS ("${query}") -> ${results.length} found`);
+      return { count: results.length, results };
+    }
+
+    function validateAddress(args) {
+      const country = args.country || 'ZA';
+      const postalCode = args.postalCode || '';
+      let valid = true;
+      let reason = 'Valid address structure';
+
+      if (country === 'ZA' && !/^\d{4}$/.test(postalCode.trim())) {
+        valid = false;
+        reason = 'South African postal codes must be exactly 4 digits.';
+      } else if (country === 'ES' && !/^\d{5}$/.test(postalCode.trim())) {
+        valid = false;
+        reason = 'Spanish postal codes must be exactly 5 digits.';
+      } else if (country === 'CA' && !/^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/.test(postalCode.trim())) {
+        valid = false;
+        reason = 'Canadian postal codes must follow format A1A 1A1.';
+      }
+
+      log(`VALIDATED ADDRESS (${country}, "${postalCode}") -> valid: ${valid} (${reason})`);
+      return { valid, reason, country, postalCode };
+    }
+
+    function handleManualSubmit(e) {
+      e.preventDefault();
+      createContact({
+        fullName: document.getElementById('fullName').value,
+        country: document.getElementById('country').value,
+        taxId: document.getElementById('taxId').value,
+        postalCode: document.getElementById('postalCode').value,
+        address: document.getElementById('address').value
+      });
+      document.getElementById('contact-form').reset();
+      updateCountryFields();
+    }
+
+    // --- WebMCP Tool Registration -------------------------------------------
+    function registerWebMCPTools() {
+      const context = document.modelContext || window.modelContext;
+      if (!context || typeof context.provideContext !== 'function') return;
+
+      context.provideContext({
+        tools: [
+          {
+            name: 'create_contact',
+            description: 'Creates a new contact with country-specific tax ID and postal code validation.',
+            inputSchema: {
+              type: 'object',
+              required: ['fullName', 'country', 'taxId', 'postalCode'],
+              properties: {
+                fullName: { type: 'string', description: 'Full name of the contact' },
+                country: { type: 'string', enum: ['ZA', 'ES', 'CA'], description: 'Country code' },
+                taxId: { type: 'string', description: 'National ID, DNI/NIF, or SIN' },
+                postalCode: { type: 'string', description: 'Postal Code' },
+                address: { type: 'string', description: 'Street address' }
+              }
+            },
+            execute: createContact
+          },
+          {
+            name: 'search_contact',
+            description: 'Searches for contacts by name, tax ID, or country code.',
+            inputSchema: {
+              type: 'object',
+              required: ['query'],
+              properties: {
+                query: { type: 'string', description: 'Search term' }
+              }
+            },
+            execute: searchContact
+          },
+          {
+            name: 'validate_address',
+            description: 'Validates postal code and address formatting for South Africa (ZA), Spain (ES), or Canada (CA).',
+            inputSchema: {
+              type: 'object',
+              required: ['country', 'postalCode'],
+              properties: {
+                country: { type: 'string', enum: ['ZA', 'ES', 'CA'] },
+                postalCode: { type: 'string' }
+              }
+            },
+            execute: validateAddress
+          }
+        ]
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      syncRegionUI();
+      registerWebMCPTools();
+    });
+  </script>
+</body>
+</html>
