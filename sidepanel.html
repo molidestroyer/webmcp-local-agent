@@ -47,6 +47,25 @@
   <main class="panes">
     <!-- ---------------------------------------------------------------- Chat -->
     <section id="tab-chat" class="pane is-active" role="tabpanel">
+      <div class="chat-header">
+        <span class="chat-header__title">Active Thread</span>
+        <div class="chat-header__actions">
+          <button id="chat-history-toggle" class="btn-small" type="button" title="View past chat sessions for this page">
+            <span>🕒 Past Sessions</span>
+            <span id="chat-history-count" class="chip-count" hidden>0</span>
+          </button>
+          <button id="chat-new-btn" class="btn-small" type="button" title="Start a new chat thread for this page">
+            <span>➕ New Chat</span>
+          </button>
+        </div>
+      </div>
+      <div id="chat-history-drawer" class="chat-history-drawer" hidden>
+        <div class="chat-history-drawer__head">
+          <span>Recent Sessions for this Page</span>
+          <button id="chat-history-close" class="btn-small btn-cancel" type="button">✕ Close</button>
+        </div>
+        <div id="chat-history-list" class="chat-history-list"></div>
+      </div>
       <div id="chat" class="chat" aria-live="polite">
         <div class="empty">
           <h1>Chat with your page</h1>

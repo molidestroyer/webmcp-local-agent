@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.6.19
+## 0.6.17
+
+Interactive Declarative/JS tool toggles, in-chat history drawer & catalog auto-resolution:
+- **Interactive Declarative vs JS Tool Toggle**: Added live mode switch on `webmcp-contacts-demo.html` to toggle between JavaScript API registration (`modelContext`) and HTML Form Declarative registration (`<form toolname="...">` with `toolautosubmit="true|false"`).
+- **Automatic Catalog Resolution for Demo Pages**: Ensured Knowledge Catalog prompts and regional business rules resolve automatically on demo pages even if no custom catalog is configured.
+- **In-Chat History Drawer**: Added `🕒 Past Sessions` drawer and `➕ New Chat` thread manager directly inside the Chat tab header.
+
+## 0.6.16
 
 Instrument the Copilot turn so a missing tool call can be told apart from a
 model that chose not to call one:

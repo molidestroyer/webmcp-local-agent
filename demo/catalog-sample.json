@@ -9,7 +9,7 @@
         "urlPattern": ".*(\\.za|/za/|region=za).*",
         "requiredTools": ["create_contact"]
       },
-      "systemContext": "ZA business rules: requires a 13-digit South African ID and UIF/PAYE withholding calculation. 4-digit postal code.",
+      "systemContext": "ZA business rules: Only South African contacts (country='ZA') are permitted on this regional portal. Requires a 13-digit South African ID and 4-digit postal code.",
       "suggestedPrompts": [
         "Create a contact for South Africa with a 13-digit ID",
         "Validate a South African address and postal code"
@@ -22,7 +22,7 @@
         "urlPattern": ".*(\\.es|/es/|region=es).*",
         "requiredTools": ["create_contact"]
       },
-      "systemContext": "ES business rules: requires a valid DNI/NIE/NIF document and a 5-digit Spanish postal code (CP).",
+      "systemContext": "ES business rules: Only Spanish contacts (country='ES') are permitted on this regional portal. Requires a valid DNI/NIE/NIF document and a 5-digit Spanish postal code (CP).",
       "suggestedPrompts": [
         "Create a contact for Spain with a valid DNI/NIF",
         "Validate an address and postal code in Spain"
@@ -35,7 +35,7 @@
         "urlPattern": ".*(\\.ca|/ca/|region=ca).*",
         "requiredTools": ["create_contact"]
       },
-      "systemContext": "CA business rules: requires a Social Insurance Number (9-digit SIN), an alphanumeric postal code (A1A 1A1), and GST/HST tax.",
+      "systemContext": "CA business rules: Only Canadian contacts (country='CA') are permitted on this regional portal. Requires a Social Insurance Number (9-digit SIN) and an alphanumeric postal code (A1A 1A1).",
       "suggestedPrompts": [
         "Create a contact for Canada with a SIN and GST/HST",
         "Validate a Canadian postal code format (A1A 1A1)"

@@ -166,6 +166,32 @@
     <button type="button" class="region-btn" id="btn-ca" onclick="setRegion('ca')">🇨🇦 Canada (?region=ca)</button>
   </div>
 
+  <div class="card" style="margin-top:12px; border-color:#8b5cf6;">
+    <h2 style="font-size:15px; margin:0 0 6px; color:#c4b5fd;">⚡ WebMCP Tool Registration Mode</h2>
+    <p style="font-size:13px; color:#94a3b8; margin:0 0 10px;">
+      Test how WebMCP Local Agent inspects tools on this page. Switch live between JavaScript API registration or Declarative HTML Form markup!
+    </p>
+    <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center; font-size:13px;">
+      <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="radio" name="webmcp-mode" value="js" checked onchange="updateWebMCPRegistrationMode()">
+        <span>⚡ <strong>JavaScript API (Imperative)</strong></span>
+      </label>
+      <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="radio" name="webmcp-mode" value="declarative" onchange="updateWebMCPRegistrationMode()">
+        <span>📝 <strong>HTML Form (Declarative)</strong></span>
+      </label>
+    </div>
+    <div id="declarative-options" style="margin-top:10px; padding-top:10px; border-top:1px solid #334155;" hidden>
+      <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+        <input type="checkbox" id="toggle-autosubmit" checked onchange="updateWebMCPRegistrationMode()">
+        <span>Auto-Submit Form (<code>toolautosubmit="true"</code>)</span>
+      </label>
+      <span style="font-size:12px; color:#94a3b8; display:block; margin-top:4px;">
+        When auto-submit is ON, AI fills and submits the HTML form automatically. When OFF, AI populates the form fields for user review.
+      </span>
+    </div>
+  </div>
+
   <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
       <h2 style="font-size:16px; margin:0;">Create New Contact</h2>
@@ -335,7 +361,19 @@
     }
 
     function createContact(args) {
-      const country = args.country || 'ZA';
+      const params = new URLSearchParams(window.location.search);
+      const activeRegion = (params.get('region') || 'za').toUpperCase();
+      const country = (args.country || activeRegion).toUpperCase();
+
+      if (country !== activeRegion) {
+        log(`REJECTED CONTACT (${args.fullName || 'Unnamed'}, ${country}) -> region mismatch (portal is ${activeRegion})`);
+        return {
+          success: false,
+          field: 'country',
+          error: `This portal is configured for region ${activeRegion}. You cannot create a contact for country ${country}.`
+        };
+      }
+
       const taxId = args.taxId || '';
       const postalCode = args.postalCode || '';
 
@@ -515,10 +553,64 @@
     ];
     const contactToolNames = contactTools.map((t) => t.name).join('", "');
 
-    // The real native API only implements registerTool() (one call per tool);
-    // provideContext() is an older/draft bulk shape some polyfills still offer.
-    // Checking for provideContext alone (as this used to) reported "not
-    // available" on a browser whose real ModelContext only has registerTool.
+    function updateWebMCPRegistrationMode() {
+      const modeRadio = document.querySelector('input[name="webmcp-mode"]:checked');
+      const mode = modeRadio ? modeRadio.value : 'js';
+      const autoSubmit = document.getElementById('toggle-autosubmit').checked;
+      const declOptions = document.getElementById('declarative-options');
+      const form = document.getElementById('contact-form');
+
+      if (declOptions) declOptions.hidden = mode !== 'declarative';
+
+      if (mode === 'declarative') {
+        const remainingJsTools = contactTools.filter(t => t.name !== 'create_contact');
+        if (ctx && typeof ctx.provideContext === 'function') {
+          ctx.provideContext({ tools: remainingJsTools });
+        } else if (ctx && typeof ctx.unregisterTool === 'function') {
+          ctx.unregisterTool('create_contact');
+        }
+
+        form.setAttribute('toolname', 'create_contact');
+        form.setAttribute('tooldescription', 'Creates a new contact using the HTML form fields. Validates taxId and postalCode according to active country rules.');
+        if (autoSubmit) {
+          form.setAttribute('toolautosubmit', 'true');
+        } else {
+          form.removeAttribute('toolautosubmit');
+        }
+        document.getElementById('fullName').setAttribute('name', 'fullName');
+        document.getElementById('fullName').setAttribute('toolparamdescription', 'Full name of the contact');
+        document.getElementById('country').setAttribute('name', 'country');
+        document.getElementById('country').setAttribute('toolparamdescription', 'Country code (ZA, ES, CA)');
+        document.getElementById('taxId').setAttribute('name', 'taxId');
+        document.getElementById('taxId').setAttribute('toolparamdescription', 'National ID, DNI/NIF, or SIN');
+        document.getElementById('postalCode').setAttribute('name', 'postalCode');
+        document.getElementById('postalCode').setAttribute('toolparamdescription', 'Postal code for the address');
+        document.getElementById('address').setAttribute('name', 'address');
+        document.getElementById('address').setAttribute('toolparamdescription', 'Street address');
+
+        log(`MODE SWITCHED -> 📝 Declarative HTML Form (create_contact, autoSubmit: ${autoSubmit})`);
+        const badge = document.getElementById('registered-badge');
+        if (badge) badge.textContent = `📝 Declarative HTML Form (autoSubmit: ${autoSubmit})`;
+      } else {
+        form.removeAttribute('toolname');
+        form.removeAttribute('tooldescription');
+        form.removeAttribute('toolautosubmit');
+
+        if (ctx && typeof ctx.registerTool === 'function') {
+          contactTools.forEach((tool) => ctx.registerTool(tool));
+        } else if (ctx && typeof ctx.provideContext === 'function') {
+          ctx.provideContext({ tools: contactTools });
+        }
+        log(`MODE SWITCHED -> ⚡ JavaScript API (create_contact registered via JS API)`);
+        const badge = document.getElementById('registered-badge');
+        if (badge) badge.textContent = '⚡ WebMCP JS Tools Registered';
+      }
+
+      if (typeof CustomEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('toolchange'));
+      }
+    }
+
     if (ctx && typeof ctx.registerTool === 'function') {
       contactTools.forEach((tool) => ctx.registerTool(tool));
       log(`Registered WebMCP tools: "${contactToolNames}"`);
