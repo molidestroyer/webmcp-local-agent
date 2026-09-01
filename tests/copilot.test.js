@@ -156,3 +156,40 @@ test('formatMessagesForCopilot pairs tool results with their call id', () => {
   assert.equal(formatted[3].tool_call_id, 'call_a');
   assert.equal(formatted[2].tool_name, undefined);
 });
+
+test('extractToolCalls keeps calls that omit the type discriminator', () => {
+  // The proxy translates tool definitions into the vendor's format and back;
+  // what returns does not always carry type:"function". Requiring it dropped
+  // every call in silence, and a tool-calling turn has no content to show.
+  const calls = CopilotService.extractToolCalls({
+    tool_calls: [
+      { id: 'call_1', function: { name: 'add_item', arguments: '{"text":"bread"}' } },
+      { id: 'call_2', type: 'function', function: { name: 'list_items', arguments: '{}' } },
+    ],
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].function.name, 'add_item');
+  assert.deepEqual(calls[0].function.arguments, { text: 'bread' });
+  assert.deepEqual(calls[1].function.arguments, {});
+});
+
+test('extractToolCalls reads Anthropic-shaped calls and survives bad arguments', () => {
+  const calls = CopilotService.extractToolCalls({
+    tool_calls: [
+      { id: 'toolu_1', name: 'add_item', input: { text: 'milk' } },
+      { id: 'call_2', function: { name: 'broken', arguments: '{not json' } },
+      { id: 'call_3', function: {} },
+    ],
+  });
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].function.arguments, { text: 'milk' });
+  assert.deepEqual(calls[1].function.arguments, {});
+});
+
+test('contentToText flattens content blocks', () => {
+  assert.equal(CopilotService.contentToText('hola'), 'hola');
+  assert.equal(CopilotService.contentToText([{ type: 'text', text: 'ho' }, { type: 'text', text: 'la' }]), 'hola');
+  assert.equal(CopilotService.contentToText(null), '');
+});

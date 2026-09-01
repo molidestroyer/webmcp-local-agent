@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.19
+
+Instrument the Copilot turn so a missing tool call can be told apart from a
+model that chose not to call one:
+- Logs the model, the message count and **the number and names of the tools actually
+  sent** before each request. A turn where `detectPageTools()` came back empty — a tab
+  switch, an SPA navigation, the bridge reconnecting after the worker slept — sends only
+  the native `wait` tool, and from the chat that is indistinguishable from the model
+  ignoring the page.
+- Logs `finish_reason`, the number of tool calls and the length of the text that came
+  back, and dumps the raw message when the answer is empty in both.
+- `extractToolCalls()` no longer requires `type: "function"` on the returned call, and
+  reads Anthropic-shaped calls (`name`/`input`). The proxy translates tool definitions
+  into the vendor format and back, so the discriminator is not guaranteed; a dropped call
+  showed up as an empty bubble, since a tool-calling turn carries no text. Robustness,
+  not a diagnosed failure.
+- Sends `tool_choice: "auto"` explicitly and flattens content blocks into text.
+
 ## 0.6.18
 
 Make Copilot tool calling actually work now that the auth does:
