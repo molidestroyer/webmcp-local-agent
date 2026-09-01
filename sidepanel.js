@@ -111,6 +111,9 @@ const els = {
   copilotCancelBtn: document.getElementById('copilot-cancel-btn'),
   copilotDisconnectBtn: document.getElementById('copilot-disconnect-btn'),
   copilotErrorMsg: document.getElementById('copilot-error-msg'),
+  catalogActive: document.getElementById('catalog-active'),
+  catalogActiveText: document.getElementById('catalog-active-text'),
+
   // logs
   logsOutput: document.getElementById('logs-output'),
   logsCopyBtn: document.getElementById('logs-copy-btn'),
@@ -169,6 +172,8 @@ const state = {
   catalogData: null,
   catalogSyncedAt: 0,
   activeSystemContext: '',
+  activeRuleNames: [],
+  announcedContext: null,
   copilotConnected: false,
   copilotModels: [],
   copilotDeviceCode: null,
@@ -192,8 +197,22 @@ function showStatus(text) {
   els.status.textContent = text || '';
 }
 
+/**
+ * Si el proveedor del modelo elegido está listo.
+ *
+ * `state.ollamaOk` solo dice si Ollama respondió. Usarlo como condición general
+ * dejaba la extensión inservible con un modelo de Copilot y Ollama parado: no
+ * se podía ni enviar un mensaje, y las sugerencias automáticas no se generaban
+ * nunca. Cada modelo responde por su proveedor.
+ */
+function providerReady() {
+  return String(state.model || '').startsWith('copilot:')
+    ? state.copilotConnected
+    : state.ollamaOk;
+}
+
 function updateSendState() {
-  els.send.disabled = state.busy || !state.ollamaOk || !state.model || !els.input.value.trim();
+  els.send.disabled = state.busy || !providerReady() || !state.model || !els.input.value.trim();
 }
 
 /** Minimal, safe markdown (never innerHTML for model output). */
@@ -719,8 +738,7 @@ function renderSuggestions() {
 }
 
 async function generatePromptSuggestions() {
-  const providerOk = state.ollamaOk || state.copilotConnected;
-  if (!state.autoSuggest || !providerOk || !state.model || !state.tools || !state.tools.length || state.busy) {
+  if (!state.autoSuggest || !providerReady() || !state.model || !state.tools || !state.tools.length || state.busy) {
     state.suggesting = false;
     state.aiSuggestions = [];
     renderSuggestions();
@@ -893,8 +911,11 @@ async function detectPageTools() {
     // If NO tools detected on active page -> clear and hide suggestions completely!
     if (!state.tools || state.tools.length === 0) {
       state.activeSystemContext = '';
+      state.activeRuleNames = [];
       state.staticSuggestions = [];
       state.aiSuggestions = [];
+      syncSystemMessage();
+      renderCatalogActive();
       clearSuggestions();
       return;
     }
@@ -909,15 +930,19 @@ async function detectPageTools() {
       }
       const resolved = C.resolveContext(tabUrl, state.tools, catalogToUse);
       state.activeSystemContext = resolved.systemContext;
+      state.activeRuleNames = (resolved.matchedRules || []).map((r) => r.name || r.id || 'rule');
       state.staticSuggestions = resolved.suggestedPrompts;
     } else {
       state.activeSystemContext = '';
+      state.activeRuleNames = [];
       state.staticSuggestions = [];
     }
 
+    syncSystemMessage();
+    renderCatalogActive();
     renderSuggestions();
 
-    if (state.autoSuggest && state.ollamaOk && state.model && !state.busy) {
+    if (state.autoSuggest && providerReady() && state.model && !state.busy) {
       generatePromptSuggestions();
     } else {
       state.aiSuggestions = [];
@@ -1544,9 +1569,57 @@ function addMessage(role, text) {
   return div;
 }
 
+/**
+ * Mete las reglas del catálogo en el mensaje de sistema de la conversación.
+ *
+ * Hasta 0.6.22 `activeSystemContext` solo se usaba para redactar las
+ * sugerencias: cargar un catálogo en Ajustes no cambiaba ni una palabra de lo
+ * que se le enviaba al modelo, y en el chat no se veía nada. Se reconstruye el
+ * mensaje 0 en cada turno porque las reglas dependen de la pestaña activa y
+ * esta cambia a mitad de conversación.
+ */
+function systemMessageContent() {
+  if (!state.activeSystemContext) return SYSTEM_PROMPT;
+  return SYSTEM_PROMPT
+    + '\n\nBUSINESS RULES FOR THIS PAGE (from the active knowledge catalog). '
+    + 'They are authoritative: follow them when choosing tools and filling arguments.\n'
+    + state.activeSystemContext;
+}
+
+function syncSystemMessage() {
+  const content = systemMessageContent();
+  if (state.messages.length && state.messages[0].role === 'system') {
+    state.messages[0].content = content;
+  } else {
+    state.messages.unshift({ role: 'system', content });
+  }
+}
+
+/** El chip sobre el compositor y el aviso en el hilo, cuando las reglas cambian. */
+function renderCatalogActive() {
+  const names = state.activeRuleNames || [];
+  if (els.catalogActive) {
+    els.catalogActive.hidden = !names.length;
+    if (els.catalogActiveText && names.length) {
+      els.catalogActiveText.textContent = names.length === 1
+        ? 'Catalog rule active: ' + names[0]
+        : names.length + ' catalog rules active: ' + names.join(', ');
+    }
+  }
+
+  // Anunciarlo una vez por cambio: repetirlo en cada re-inspección llenaría el
+  // hilo de avisos idénticos.
+  const signature = state.activeSystemContext;
+  if (signature === state.announcedContext) return;
+  state.announcedContext = signature;
+  if (!signature || state.tab !== 'chat') return;
+  addMessage('note', 'Catalog rules for this page are now part of every message:\n'
+    + state.activeSystemContext);
+}
+
 /** Shared by the 🗑 button and the "reset on tab switch" setting. */
 function resetConversation() {
-  state.messages = [{ role: 'system', content: SYSTEM_PROMPT }];
+  state.messages = [{ role: 'system', content: systemMessageContent() }];
   els.chat.textContent = '';
   const empty = document.createElement('div');
   empty.className = 'empty';
@@ -1915,6 +1988,7 @@ async function copilotChat(messages, tools, onChunk) {
 
 async function runAgent() {
   const isCopilot = state.model.startsWith('copilot:');
+  syncSystemMessage();
 
   for (let step = 0; step < MAX_TOOL_STEPS; step++) {
     await detectPageTools();
@@ -2419,6 +2493,10 @@ if (els.chatNewBtn) {
 
 if (els.threadsNewBtn) {
   els.threadsNewBtn.addEventListener('click', startNewSession);
+}
+
+if (els.catalogActive) {
+  els.catalogActive.addEventListener('click', () => setTab('settings'));
 }
 
 if (els.chatThreadTitle) {

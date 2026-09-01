@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.23
+
+El catálogo por fin llega al chat, y el proveedor deja de ser siempre Ollama:
+- **Las reglas del catálogo nunca entraban en la conversación.** `activeSystemContext`
+  se resolvía y solo se usaba para redactar las sugerencias: cargar un catálogo en
+  Ajustes no cambiaba ni una palabra de lo que se le enviaba al modelo. Ahora
+  `syncSystemMessage()` reconstruye el mensaje de sistema en cada turno con las reglas
+  de la pestaña activa.
+- **Y ahora se ve**: un aviso en el hilo la primera vez que las reglas cambian, y un chip
+  permanente sobre el compositor (`Catalog rule active: …`) que lleva a Ajustes.
+- **Con un modelo de Copilot y Ollama parado la extensión estaba muerta**: el botón de
+  enviar y las sugerencias automáticas se condicionaban a `state.ollamaOk`. `providerReady()`
+  pregunta al proveedor del modelo elegido.
+- Cabecera del chat: un título largo se desbordaba sobre los botones. Una columna `auto`
+  de grid no baja de su `min-content`, y el `min-content` de un título `nowrap` es la
+  frase entera: ahora es `minmax(0, auto)`.
+
 ## 0.6.22
 
 Chat header, conversation naming, and the catalog card telling the truth again:

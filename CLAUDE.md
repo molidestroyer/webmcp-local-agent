@@ -234,6 +234,26 @@ exchanged for a short-lived session token (~25 min) plus an `endpoints` object.
 - Host permissions: `github.com` and `api.github.com` are listed explicitly,
   `api*.githubcopilot.com` is covered by `<all_urls>`.
 
+## Catálogo: resolver no es aplicar
+
+`resolveContext()` devuelve el `systemContext` de las reglas que casan con la pestaña,
+pero hasta 0.6.23 eso **solo** alimentaba el prompt de las sugerencias. El chat seguía
+enviando `SYSTEM_PROMPT` a secas, así que un catálogo cargado no cambiaba nada de lo que
+veía el modelo y en la interfaz no había ni rastro de él. Dos reglas:
+
+- `syncSystemMessage()` es quien mete las reglas en `state.messages[0]`, y se llama en
+  cada `detectPageTools()` **y** al principio de `runAgent()`: las reglas dependen de la
+  pestaña, que puede cambiar a mitad de conversación.
+- Todo lo que el catálogo hace tiene que **verse** (`renderCatalogActive()`: chip sobre el
+  compositor + aviso en el hilo). Una funcionalidad invisible se da por rota, y con razón.
+
+## El proveedor no es siempre Ollama
+
+`state.ollamaOk` dice si Ollama contestó, no si se puede chatear. Usarlo como condición
+general dejó la extensión inservible con un modelo de Copilot y Ollama parado: `send`
+deshabilitado y sugerencias automáticas que no se generaban nunca. Cualquier condición del
+tipo "¿hay proveedor?" va por `providerReady()`, que mira el modelo elegido.
+
 ## Chat threads
 
 The Chat tab is two sub-views over one `state`: `#chat-threads-view` (the picker) and
