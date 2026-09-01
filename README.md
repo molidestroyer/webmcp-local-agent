@@ -12,6 +12,26 @@ Everything runs locally. The extension talks to no external service.
 
 ---
 
+## Demo
+
+Real footage: the extension discovering the five tools this page registers, a local
+`gemma` picking `create_contact`, filling it from a sentence in plain language and running
+it against the page — the contact on the left is created by that call.
+
+<video src="https://github.com/molidestroyer/webmcp-local-agent/raw/main/docs/demo.mp4"
+       poster="https://github.com/molidestroyer/webmcp-local-agent/raw/main/docs/demo-poster.jpg"
+       controls muted playsinline width="100%"></video>
+
+[![WebMCP Local Agent demo](https://github.com/molidestroyer/webmcp-local-agent/raw/main/docs/demo-poster.jpg)](https://github.com/molidestroyer/webmcp-local-agent/raw/main/docs/demo.mp4)
+
+*(1:46 — if the player above does not load, the image is a link to the file.)*
+
+The chat scenes are sped up: a 4B model on a laptop answers in about half a minute, and
+that is dead air in a demo. Nothing else is edited — the tool calls, their arguments and
+their results are the real ones.
+
+---
+
 ## Credits
 
 This project **would not exist without the prior work of these authors** — it is little

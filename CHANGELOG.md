@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.25
+
+- Vídeo de demostración (1:46, 16:9, narración en inglés) en el README, con `docs/demo.mp4`
+  y su póster. Metraje real: descubrimiento de tools, `create_contact` llamada por un
+  gemma local y el contacto apareciendo en la página. Las escenas de chat van aceleradas.
+
 ## 0.6.24
 
 System prompt reescrito y "None" pasa a significar none:
