@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.21
+
+Fix declarative tool execution timeout & enrich contacts list UI details:
+- **Fix Declarative Form Execution Timeout**: Prioritized HTML form DOM detection in `page-hook.js` `executeTool` so calling `<form toolname="...">` returns immediately instead of waiting on polyfilled/native `RegisteredTool.execute()` hanging promises (resolving "The page did not respond in time").
+- **Auto-Submit & Field Populate Handling**: Enhanced `executeDeclarativeForm` to support both `toolautosubmit="true"` (submits form) and `toolautosubmit="false"` (populates fields for review), returning structured field payloads.
+- **Detailed Contact Fields Display**: Updated `renderContactsList()` in `webmcp-contacts-demo.html` to display all contact properties (`fullName`, `country`, `taxId`, `postalCode`, `address`) in full detail.
+
 ## 0.6.20
 
 Interactive Declarative/JS tool toggles, in-chat history drawer & catalog auto-resolution:

@@ -67,12 +67,13 @@ const els = {
   status: document.getElementById('status'),
   // chat
   chat: document.getElementById('chat'),
-  chatHistoryToggle: document.getElementById('chat-history-toggle'),
-  chatHistoryCount: document.getElementById('chat-history-count'),
+  chatThreadsView: document.getElementById('chat-threads-view'),
+  chatActiveView: document.getElementById('chat-active-view'),
+  chatThreadsList: document.getElementById('chat-threads-list'),
+  chatBackBtn: document.getElementById('chat-back-btn'),
+  chatThreadTitle: document.getElementById('chat-thread-title'),
   chatNewBtn: document.getElementById('chat-new-btn'),
-  chatHistoryDrawer: document.getElementById('chat-history-drawer'),
-  chatHistoryClose: document.getElementById('chat-history-close'),
-  chatHistoryList: document.getElementById('chat-history-list'),
+  threadsNewBtn: document.getElementById('threads-new-btn'),
   composer: document.getElementById('composer'),
   input: document.getElementById('input'),
   send: document.getElementById('send'),
@@ -146,6 +147,9 @@ const state = {
   selectedTool: '',
   messages: [{ role: 'system', content: SYSTEM_PROMPT }],
   history: [],
+  chatSessions: [],
+  currentSessionId: 'session-' + Date.now(),
+  chatSubView: 'chat',
   tabId: null,
   tabUrl: '',
   lastNotedTabId: undefined,
@@ -1928,6 +1932,7 @@ async function sendMessage() {
     await detectPageTools();
     await runAgent();
   } finally {
+    saveCurrentChatSession();
     state.busy = false;
     updateSendState();
     els.input.focus();
@@ -2029,78 +2034,152 @@ els.clearChat.addEventListener('click', () => {
   generatePromptSuggestions();
 });
 
-function renderInChatHistoryDrawer() {
-  if (!els.chatHistoryList) return;
-  els.chatHistoryList.textContent = '';
+function saveCurrentChatSession() {
+  const userMsgs = (state.messages || []).filter((m) => m.role === 'user');
+  if (userMsgs.length === 0) return;
 
-  const sessions = (state.history || []).filter(h => h.messages && h.messages.length > 1);
-  if (els.chatHistoryCount) {
-    els.chatHistoryCount.textContent = sessions.length;
-    els.chatHistoryCount.hidden = sessions.length === 0;
+  const firstMsg = userMsgs[0].content;
+  const title = firstMsg.slice(0, 45).replace(/\n/g, ' ');
+  let domain = 'local';
+  try {
+    if (state.tabUrl) domain = new URL(state.tabUrl).hostname;
+  } catch (_) { /* invalid url */ }
+
+  let session = (state.chatSessions || []).find((s) => s.id === state.currentSessionId);
+  if (session) {
+    session.title = title;
+    session.messages = [...state.messages];
+    session.updatedAt = Date.now();
+    session.url = state.tabUrl;
+    session.domain = domain;
+  } else {
+    session = {
+      id: state.currentSessionId,
+      title,
+      messages: [...state.messages],
+      updatedAt: Date.now(),
+      url: state.tabUrl,
+      domain,
+    };
+    state.chatSessions.unshift(session);
   }
+
+  chrome.storage.local.set({ chatSessions: state.chatSessions });
+}
+
+function loadChatSession(session) {
+  state.currentSessionId = session.id;
+  state.messages = [...session.messages];
+
+  els.chat.textContent = '';
+  for (const m of session.messages) {
+    if (m.role !== 'system') addMessage(m.role, m.content);
+  }
+
+  setChatSubView('chat');
+}
+
+function setChatSubView(subView) {
+  state.chatSubView = subView;
+  if (subView === 'threads') {
+    if (els.chatThreadsView) els.chatThreadsView.hidden = false;
+    if (els.chatActiveView) els.chatActiveView.hidden = true;
+    if (els.composer) els.composer.hidden = true;
+    renderChatThreadsView();
+  } else {
+    if (els.chatThreadsView) els.chatThreadsView.hidden = true;
+    if (els.chatActiveView) els.chatActiveView.hidden = false;
+    if (els.composer) els.composer.hidden = false;
+  }
+}
+
+function renderChatThreadsView() {
+  if (!els.chatThreadsList) return;
+  els.chatThreadsList.textContent = '';
+
+  saveCurrentChatSession();
+
+  let domain = '';
+  try {
+    if (state.tabUrl) domain = new URL(state.tabUrl).hostname;
+  } catch (_) { /* invalid url */ }
+
+  const sessions = (state.chatSessions || []).filter((s) => !domain || s.domain === domain || (s.url && s.url.includes(domain)));
 
   if (sessions.length === 0) {
     const empty = document.createElement('div');
-    empty.style.padding = '8px 10px';
-    empty.style.fontSize = '12px';
-    empty.style.color = 'var(--text-dim)';
-    empty.textContent = 'No saved sessions yet. Send a message to start one!';
-    els.chatHistoryList.appendChild(empty);
+    empty.className = 'empty';
+    empty.style.padding = '24px 12px';
+    const h1 = document.createElement('h1');
+    h1.style.fontSize = '15px';
+    h1.textContent = 'No past conversations for this page';
+    const p = document.createElement('p');
+    p.textContent = 'Click "➕ New Chat" to start a thread on this page.';
+    empty.append(h1, p);
+    els.chatThreadsList.appendChild(empty);
     return;
   }
 
-  for (const session of sessions) {
-    const item = document.createElement('div');
-    item.className = 'chat-session-item';
-    if (state.currentSessionId === session.id) item.classList.add('is-active');
+  for (const s of sessions) {
+    const card = document.createElement('div');
+    card.className = 'thread-card';
+    if (s.id === state.currentSessionId) card.classList.add('is-active');
 
-    const firstUserMsg = session.messages.find(m => m.role === 'user');
-    const snippet = firstUserMsg ? firstUserMsg.content.slice(0, 40) : 'Conversation';
-    const date = new Date(session.timestamp || session.ts || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const info = document.createElement('div');
+    info.className = 'thread-card__info';
 
-    const titleEl = document.createElement('span');
-    titleEl.textContent = `${snippet}…`;
+    const titleEl = document.createElement('div');
+    titleEl.className = 'thread-card__title';
+    titleEl.textContent = s.title || 'Untitled Thread';
 
-    const metaEl = document.createElement('span');
-    metaEl.style.fontSize = '10px';
-    metaEl.style.color = 'var(--text-faint)';
-    metaEl.textContent = `${session.messages.length - 1} msgs · ${date}`;
+    const metaEl = document.createElement('div');
+    metaEl.className = 'thread-card__meta';
+    const msgCount = (s.messages || []).filter((m) => m.role !== 'system').length;
+    const time = new Date(s.updatedAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    metaEl.textContent = `${msgCount} msg${msgCount === 1 ? '' : 's'} · ${time}`;
 
-    item.append(titleEl, metaEl);
-    item.addEventListener('click', () => {
-      state.messages = [...session.messages];
-      state.currentSessionId = session.id;
-      els.chat.textContent = '';
-      for (const m of session.messages) {
-        if (m.role !== 'system') addMessage(m.role, m.content);
+    info.append(titleEl, metaEl);
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'thread-card__del';
+    delBtn.textContent = '🗑';
+    delBtn.title = 'Delete thread';
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.chatSessions = state.chatSessions.filter((item) => item.id !== s.id);
+      chrome.storage.local.set({ chatSessions: state.chatSessions });
+      if (state.currentSessionId === s.id) {
+        resetConversation();
       }
-      if (els.chatHistoryDrawer) els.chatHistoryDrawer.hidden = true;
+      renderChatThreadsView();
     });
 
-    els.chatHistoryList.appendChild(item);
+    card.append(info, delBtn);
+    card.addEventListener('click', () => loadChatSession(s));
+    els.chatThreadsList.appendChild(card);
   }
 }
 
-if (els.chatHistoryToggle) {
-  els.chatHistoryToggle.addEventListener('click', () => {
-    if (els.chatHistoryDrawer) {
-      els.chatHistoryDrawer.hidden = !els.chatHistoryDrawer.hidden;
-      if (!els.chatHistoryDrawer.hidden) renderInChatHistoryDrawer();
-    }
-  });
-}
-
-if (els.chatHistoryClose) {
-  els.chatHistoryClose.addEventListener('click', () => {
-    if (els.chatHistoryDrawer) els.chatHistoryDrawer.hidden = true;
-  });
+if (els.chatBackBtn) {
+  els.chatBackBtn.addEventListener('click', () => setChatSubView('threads'));
 }
 
 if (els.chatNewBtn) {
   els.chatNewBtn.addEventListener('click', () => {
+    saveCurrentChatSession();
     resetConversation();
     generatePromptSuggestions();
-    if (els.chatHistoryDrawer) els.chatHistoryDrawer.hidden = true;
+    setChatSubView('chat');
+  });
+}
+
+if (els.threadsNewBtn) {
+  els.threadsNewBtn.addEventListener('click', () => {
+    saveCurrentChatSession();
+    resetConversation();
+    generatePromptSuggestions();
+    setChatSubView('chat');
   });
 }
 
@@ -2340,8 +2419,10 @@ if (els.copilotCopyCodeBtn) {
     'catalogUrl',
     'catalogToken',
     'webmcp_catalog_cache',
+    'chatSessions',
   ]);
 
+  state.chatSessions = Array.isArray(stored.chatSessions) ? stored.chatSessions : [];
   els.confirmTools.checked = Boolean(stored.confirmTools);
   state.autoSuggest = Boolean(stored.autoSuggest);
   if (els.autoSuggestToggle) els.autoSuggestToggle.checked = state.autoSuggest;

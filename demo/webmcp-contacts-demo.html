@@ -306,7 +306,8 @@
         row.className = 'contact-row';
 
         const info = document.createElement('span');
-        info.textContent = `${c.fullName} · ${c.country} · ${c.taxId}`;
+        const addr = c.address ? ` · Address: ${c.address}` : '';
+        info.textContent = `${c.fullName} (${c.country}) · Tax ID: ${c.taxId} · Zip: ${c.postalCode}${addr}`;
 
         const right = document.createElement('span');
         right.style.display = 'flex';

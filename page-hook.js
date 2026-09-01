@@ -139,6 +139,7 @@
   function executeDeclarativeForm(form, params) {
     if (!form) return { success: false, error: 'Form not found in document.' };
     const inputs = form.querySelectorAll('input, select, textarea');
+    const populated = {};
     for (const el of inputs) {
       const fieldName = el.getAttribute('name') || el.id;
       if (!fieldName || !(fieldName in params)) continue;
@@ -152,26 +153,45 @@
         el.value = val === undefined || val === null ? '' : String(val);
       }
 
+      populated[fieldName] = el.value;
+
       try {
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
       } catch (_) { /* noop */ }
     }
 
+    const autoSubmitAttr = form.getAttribute('toolautosubmit');
+    const shouldSubmit = autoSubmitAttr === 'true' || autoSubmitAttr === '' || form.hasAttribute('toolautosubmit');
+
+    if (!shouldSubmit) {
+      return {
+        success: true,
+        submitted: false,
+        message: 'Form fields populated for review (autoSubmit is disabled).',
+        populatedFields: populated
+      };
+    }
+
     try {
-      if (typeof form.requestSubmit === 'function') {
+      const submitBtn = form.querySelector('button[type="submit"], input[type="submit"], button');
+      if (submitBtn) {
+        submitBtn.click();
+      } else if (typeof form.requestSubmit === 'function') {
         form.requestSubmit();
       } else if (typeof form.submit === 'function') {
         form.submit();
-      } else {
-        const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
-        if (submitBtn) submitBtn.click();
       }
     } catch (err) {
       return { success: false, error: String((err && err.message) || err) };
     }
 
-    return { success: true, message: 'Declarative form submitted.' };
+    return {
+      success: true,
+      submitted: true,
+      message: 'Declarative form populated and submitted successfully.',
+      populatedFields: populated
+    };
   }
 
   function registrationOf(name) {
@@ -473,9 +493,13 @@
     const params = args && typeof args === 'object' ? args : {};
     const contexts = contextObjects().map((entry) => entry.obj);
 
-    // Primary path: the current API takes the RegisteredTool object, not its
-    // name. That object is realm-bound, so it is looked up again right now
-    // rather than cached from discovery or sent across extension messaging.
+    // Declarative HTML form tool check: if <form toolname="..."> exists in DOM, execute it directly
+    const declForm = findDeclarativeForm(name);
+    if (declForm) {
+      return executeDeclarativeForm(declForm, params);
+    }
+
+    // Primary path for JS registered tools:
     const resolved = await S.resolveRegisteredTool(contexts, name, origin, window);
     if (resolved) {
       try {
