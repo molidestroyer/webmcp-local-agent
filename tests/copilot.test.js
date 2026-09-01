@@ -77,3 +77,82 @@ test('fetchCopilotModels returns models list array', async () => {
   const models = await CopilotService.fetchCopilotModels('fake-token');
   assert.ok(Array.isArray(models));
 });
+
+test('formatToolsForCopilot accepts tools already in OpenAI shape', () => {
+  // runAgent() hands over toOllamaTool() output, not the flat descriptor.
+  // Reading t.name off this shape produced nameless tools and the API rejected
+  // the turn with "tools.0.custom.name: String should have at least 1 character".
+  const wrapped = [
+    {
+      type: 'function',
+      function: {
+        name: 'wait',
+        description: 'Pause execution.',
+        parameters: { type: 'object', properties: { seconds: { type: 'number' } } },
+      },
+    },
+  ];
+
+  const formatted = CopilotService.formatToolsForCopilot(wrapped);
+  assert.equal(formatted.length, 1);
+  assert.equal(formatted[0].function.name, 'wait');
+  assert.equal(formatted[0].function.description, 'Pause execution.');
+  assert.deepEqual(formatted[0].function.parameters, wrapped[0].function.parameters);
+});
+
+test('formatToolsForCopilot drops nameless tools instead of sending them', () => {
+  const formatted = CopilotService.formatToolsForCopilot([
+    { description: 'no name at all' },
+    { name: 'ok', inputSchema: { type: 'object', properties: {} } },
+  ]);
+  assert.equal(formatted.length, 1);
+  assert.equal(formatted[0].function.name, 'ok');
+  assert.equal(CopilotService.formatToolsForCopilot([{ description: 'nothing' }]), undefined);
+});
+
+test('isChatCompletionsModel keeps only models /chat/completions can serve', () => {
+  assert.equal(CopilotService.isChatCompletionsModel({ id: 'gpt-4o' }), true);
+  assert.equal(CopilotService.isChatCompletionsModel('gpt-4o'), true);
+  assert.equal(
+    CopilotService.isChatCompletionsModel({
+      id: 'gpt-4o',
+      capabilities: { type: 'chat' },
+      supported_endpoints: ['/chat/completions', '/responses'],
+    }),
+    true
+  );
+  // The gpt-5.4-mini case: listed, but only reachable through /responses.
+  assert.equal(
+    CopilotService.isChatCompletionsModel({ id: 'gpt-5.4-mini', supported_endpoints: ['/responses'] }),
+    false
+  );
+  assert.equal(
+    CopilotService.isChatCompletionsModel({ id: 'text-embedding-3-small', capabilities: { type: 'embeddings' } }),
+    false
+  );
+  assert.equal(
+    CopilotService.isChatCompletionsModel({ id: 'internal', model_picker_enabled: false }),
+    false
+  );
+});
+
+test('formatMessagesForCopilot pairs tool results with their call id', () => {
+  const formatted = CopilotService.formatMessagesForCopilot([
+    { role: 'user', content: 'add bread' },
+    {
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        { id: 'call_a', function: { name: 'add_item', arguments: { text: 'bread' } } },
+        { id: 'call_b', function: { name: 'list_items', arguments: {} } },
+      ],
+    },
+    // Ollama-shaped result: tool_name only, which the API cannot pair up.
+    { role: 'tool', tool_name: 'list_items', content: '1 item' },
+    { role: 'tool', tool_name: 'add_item', tool_call_id: 'call_a', content: 'ok' },
+  ]);
+
+  assert.equal(formatted[2].tool_call_id, 'call_b');
+  assert.equal(formatted[3].tool_call_id, 'call_a');
+  assert.equal(formatted[2].tool_name, undefined);
+});

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.18
+
+Make Copilot tool calling actually work now that the auth does:
+- **Every Copilot turn with tools was rejected** with
+  `tools.0.custom.name: String should have at least 1 character`.
+  `runAgent()` hands over tools already mapped through `toOllamaTool()`
+  (`{ type, function: { name, parameters } }`), but `formatToolsForCopilot()` read
+  `t.name` off the flat WebMCP descriptor, so every tool went out unnamed. It now
+  accepts both shapes and drops anything still nameless instead of sending it.
+- **Models that cannot answer on `/chat/completions` are no longer offered.** GitHub's
+  `/models` lists everything the account can reach — embeddings models and newer ones
+  that only answer on `/responses` — so picking one failed at send time with
+  `unsupported_api_for_model`. Filtered by `capabilities.type`, `supported_endpoints`
+  and `model_picker_enabled`, falling back to the raw list if that leaves nothing.
+- Models that support tool calling are marked `· tools` in the picker, as Ollama's are.
+- **Tool results now carry `tool_call_id`.** They only had Ollama's `tool_name`, so the
+  turn *after* any tool call would have been rejected as well. `formatMessagesForCopilot()`
+  also pairs an id-less result with its call by name, for conversations built for Ollama.
+- Copilot API errors are unwrapped from their JSON body instead of being pasted raw, and
+  `unsupported_api_for_model` says which model to change.
+
 ## 0.6.17
 
 Fix the GitHub Copilot device flow and make the 🐞 Logs tab reachable:

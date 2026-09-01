@@ -1773,9 +1773,19 @@ async function runToolCall(call) {
   const args = parseArguments(fn.arguments);
   const card = createToolCard(name || '(unnamed)', args);
 
+  // tool_call_id is what OpenAI-shaped providers (Copilot) pair the result
+  // with; Ollama pairs on tool_name and ignores the extra field. Every exit
+  // below goes through this, so no path can forget the id.
+  const toolMessage = (text) => ({
+    role: 'tool',
+    tool_name: String(name || 'unknown'),
+    ...(call && call.id ? { tool_call_id: call.id } : {}),
+    content: text,
+  });
+
   const finish = (ok, output) => {
     recordExecution({ tool: String(name || 'unknown'), origin: 'chat', args, ok, output });
-    return { role: 'tool', tool_name: String(name || 'unknown'), content: ok ? output : 'Error: ' + output };
+    return toolMessage(ok ? output : 'Error: ' + output);
   };
 
   const isBuiltinWait = name === 'wait';
@@ -1791,7 +1801,7 @@ async function runToolCall(call) {
       const text = 'The user cancelled this tool call.';
       card.cancelled(text);
       recordExecution({ tool: name || 'wait', origin: 'chat', args, ok: false, output: text });
-      return { role: 'tool', tool_name: name || 'wait', content: text };
+      return toolMessage(text);
     }
   }
 
@@ -1804,7 +1814,7 @@ async function runToolCall(call) {
     const text = `Waited ${sec} second(s) for page updates. Current page exposes ${state.tools.length} tool(s).`;
     card.done(text);
     recordExecution({ tool: 'wait', origin: 'chat', args, ok: true, output: text, ms });
-    return { role: 'tool', tool_name: 'wait', content: text };
+    return toolMessage(text);
   }
 
   const started = performance.now();
@@ -1815,13 +1825,13 @@ async function runToolCall(call) {
     const text = (answer && answer.error) || 'Unknown error while running the tool.';
     card.fail(text);
     recordExecution({ tool: name, origin: 'chat', args, ok: false, output: text, ms });
-    return { role: 'tool', tool_name: name, content: 'Error: ' + text };
+    return toolMessage('Error: ' + text);
   }
 
   const text = resultToText(answer.result);
   card.done(text);
   recordExecution({ tool: name, origin: 'chat', args, ok: true, output: text, ms });
-  return { role: 'tool', tool_name: name, content: text };
+  return toolMessage(text);
 }
 
 async function copilotChat(messages, tools, onChunk) {

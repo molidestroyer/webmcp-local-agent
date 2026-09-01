@@ -234,6 +234,27 @@ exchanged for a short-lived session token (~25 min) plus an `endpoints` object.
 - Host permissions: `github.com` and `api.github.com` are listed explicitly,
   `api*.githubcopilot.com` is covered by `<all_urls>`.
 
+## Talking to Copilot (OpenAI shape, not Ollama shape)
+
+`runAgent()` builds **one** tool array, mapped through `toOllamaTool()` and prefixed with
+`NATIVE_WAIT_TOOL`, and hands it to whichever provider is selected. Both providers take
+the OpenAI `{ type: 'function', function: { name, parameters } }` shape, so it looks
+interchangeable — and the two places it is not are both silent:
+
+- `formatToolsForCopilot()` gets that wrapped shape, **not** the flat WebMCP descriptor.
+  Reading `t.name`/`t.inputSchema` off it yields `undefined` and the whole turn comes back
+  as `tools.0.custom.name: String should have at least 1 character`. It accepts both
+  shapes now; keep it that way, and keep dropping nameless tools rather than sending them.
+- **A tool result must carry `tool_call_id`.** Ollama pairs results with calls by
+  `tool_name`, OpenAI-shaped APIs by the id of the call. `runToolCall()` returns both from
+  a single `toolMessage()` helper precisely so no exit path can forget one.
+
+`/models` lists everything the account can reach, including embeddings models and models
+that only answer on `/responses`; offering those means the failure lands at send time as
+`unsupported_api_for_model`. `isChatCompletionsModel()` filters them, and falls back to
+the unfiltered list if the filter leaves nothing — a listing shape we did not anticipate
+should not produce an empty picker.
+
 ## Logs tab
 
 `#tab-logs` monkey-patches `console.log/warn/error` in the panel and keeps the last 300
