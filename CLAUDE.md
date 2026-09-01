@@ -34,7 +34,8 @@ Repo language is **English** — code, comments, UI strings, docs and commit mes
 | `tests/schema.test.js` | node | 23 tests, no dependencies. Run by `build.ps1` and CI before packaging. |
 | `content.js` | ISOLATED | Bridge. Opens `chrome.runtime.connect({name:'webmcp-bridge'})` **towards** the SW. |
 | `background.js` | SW | `tabId → Port` map, request/response routing with timeouts, `sidePanel.setPanelBehavior`, rescue injection via `scripting.executeScript`. |
-| `sidepanel.{html,css,js}` | panel | Four tabs (`#tab-chat`, `#tab-tools`, `#tab-execute`, `#tab-history`) over one shared `state`, plus the tool-calling loop against `/api/chat`. Fixed dark theme, no light mode. |
+| `sidepanel.{html,css,js}` | panel | Six tabs (`#tab-chat`, `#tab-tools`, `#tab-execute`, `#tab-history`, `#tab-logs`, `#tab-settings`) over one shared `state`, plus the tool-calling loop against `/api/chat`. Fixed dark theme, no light mode. |
+| `lib/copilot-service.js` | panel + node | GitHub Copilot provider: model listing and OpenAI-shaped chat completions with tool calling. Endpoint URLs are built by `endpointFor()`. |
 | `demo/` | — | Playground: `index.html` landing, `webmcp-demo.html` (imperative), `webmcp-native-demo.html` (native API shape) and `webmcp-form-demo.html` (declarative `<form toolname>`, no registration code at all). Published to GitHub Pages **and** shipped inside the zip from this one folder, so the two can never drift. |
 | `.github/workflows/pages.yml` | — | Deploys `demo/` to <https://molidestroyer.github.io/webmcp-local-agent/> on pushes that touch it. Needs Settings → Pages → Source = **GitHub Actions** (one-time, done by hand). |
 | `build.ps1` | — | Validates + packages into `dist/webmcp-local-agent-<version>.zip`. |
@@ -207,6 +208,43 @@ for one kind and not the other, that asymmetry is where to look:
   and, again, only the declarative ones seem to vanish.
 - `list` answers `{ tools, errors, discovered, formsInDom }`; `toolsFromListing()` still
   accepts a bare array so a rescue-injected older hook keeps working.
+
+## GitHub Copilot auth (device flow)
+
+Client ID `Iv1.b507a08c87ecfe98` with scope `read:user` — the copilot.vim app, which is
+the one whose OAuth tokens `api.github.com/copilot_internal/v2/token` accepts. Two steps,
+and only the second proves anything: GitHub's OAuth token is not a Copilot token, it is
+exchanged for a short-lived session token (~25 min) plus an `endpoints` object.
+
+- **A device-flow poll answering is not a device-flow poll succeeding.** GitHub replies
+  `200 { "error": "authorization_pending" }` until the user types the code, so
+  `res.ok` and a transport-level `success: true` are both true the whole time. 0.6.8
+  through 0.6.16 shipped a panel that read the worker's `success: true` as authorization:
+  the first tick, five seconds in, marked the panel connected and stopped polling, no
+  token was ever stored, and every later call failed with "No GitHub OAuth token found".
+  `pollCopilotAuth()` therefore returns an explicit `status` of `pending` / `success` /
+  `error`, and `COPILOT_PENDING_ERRORS` is the *only* thing that keeps polling alive.
+- The same shape applies to `login/device/code`: a bad client ID or an app without device
+  flow enabled comes back **200 with an `error` body**. Check the body, not the status.
+- A failed token exchange is not a failed authorization. Say which one broke, or a Copilot
+  subscription problem reads as "the code you typed was wrong".
+- `endpoints.api` is a **base** URL. `endpointFor()` in `lib/copilot-service.js` owns
+  appending `/models` or `/chat/completions`; callers must not pre-append, which is how
+  `.../models/models` shipped and left only the hardcoded fallbacks working.
+- Host permissions: `github.com` and `api.github.com` are listed explicitly,
+  `api*.githubcopilot.com` is covered by `<all_urls>`.
+
+## Logs tab
+
+`#tab-logs` monkey-patches `console.log/warn/error` in the panel and keeps the last 300
+lines. Two things it is easy to get wrong:
+
+- **A pane in the markup is not a tab.** `setTab()` validates against `TABS`, and anything
+  missing there silently falls back to the chat — which is exactly how 0.6.16 shipped a
+  Logs tab that could not be opened.
+- The panel's console does not see the service worker's. Auth, badge refresh and the
+  bridge all run there, so `background.js` mirrors its diagnostics with
+  `diag()` → `BG_LOG` → `appendLog()`. Without that, an auth failure is half invisible.
 
 ## Gotchas
 

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.17
+
+Fix the GitHub Copilot device flow and make the 🐞 Logs tab reachable:
+- **The device flow never completed.** `POLL_COPILOT_AUTH` answered `success: true` for
+  every poll, `authorization_pending` included, so the first tick — five seconds in,
+  before the user had typed the code on github.com — flipped the panel to "connected"
+  and stopped polling. No OAuth token was ever stored, which is why every Copilot call
+  errored afterwards and the model list stayed empty. Polling now branches on an explicit
+  `status` of `pending` / `success` / `error`.
+- Terminal errors (`access_denied`, `expired_token`, a Copilot subscription that does not
+  cover the account) stop the flow with their own message instead of a generic failure,
+  and the device code deadline is honoured.
+- **The 🐞 Logs tab could not be opened**: `logs` was missing from `TABS`, so `setTab()`
+  fell back to the chat. Added.
+- The service worker now mirrors its auth diagnostics into that tab (`BG_LOG`); the auth
+  fetches run there, so half of every failure used to be invisible from the panel.
+- Copilot model listing reports why it came back empty (token, library or endpoints)
+  instead of silently rendering an empty picker.
+- Fixed the model endpoint being built as `.../models/models`: the caller appended
+  `/models` and `fetchCopilotModels` appended it again, so only the hardcoded fallbacks
+  ever answered. `endpointFor()` now normalizes and is covered by tests.
+- Reopening the panel with a stored GitHub token but an expired Copilot session token
+  re-exchanges it instead of reporting a disconnection.
+
 ## 0.6.16
 
 Fix Ollama rendering ReferenceError & add dedicated 🐞 Logs diagnostic tab:

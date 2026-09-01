@@ -207,6 +207,36 @@ async function bridge(tabId, action, payload) {
 
 const COPILOT_CLIENT_ID = 'Iv1.b507a08c87ecfe98';
 
+// Device-flow errors that mean "keep polling"; everything else is terminal.
+// Treating them as success is what made the panel report a connection after the
+// very first poll, before GitHub had seen the user's code at all.
+const COPILOT_PENDING_ERRORS = new Set(['authorization_pending', 'slow_down']);
+
+/**
+ * Mirrors a worker-side diagnostic into the side panel's Logs tab.
+ *
+ * The auth fetches happen here, in the service worker, so their console output
+ * lands in the worker's own devtools window and not in the panel. Without this
+ * the Logs tab can only ever show half of an auth failure.
+ */
+function diag(level, message) {
+  const line = '[Copilot/SW] ' + message;
+  if (level === 'ERROR') console.error(line);
+  else if (level === 'WARN') console.warn(line);
+  else console.log(line);
+  chrome.runtime.sendMessage({ type: 'BG_LOG', level, message: line }).catch(() => {});
+}
+
+/** Reads a response as JSON but keeps the raw body for the error message. */
+async function readJson(res, what) {
+  const raw = await res.text().catch(() => '');
+  try {
+    return { data: JSON.parse(raw), raw };
+  } catch (_) {
+    throw new Error(`${what} did not return JSON (${res.status} ${res.statusText}): ${raw.slice(0, 300)}`);
+  }
+}
+
 async function startCopilotAuth() {
   const res = await fetch('https://github.com/login/device/code', {
     method: 'POST',
@@ -219,10 +249,16 @@ async function startCopilotAuth() {
       scope: 'read:user',
     }),
   });
-  if (!res.ok) {
+  const { data } = await readJson(res, 'Device code request');
+  // GitHub answers 200 with an { error } body for a bad client_id or an app
+  // without device flow enabled, so the status alone proves nothing.
+  if (data.error) {
+    throw new Error(`Device code request rejected: ${data.error}${data.error_description ? ' - ' + data.error_description : ''}`);
+  }
+  if (!res.ok || !data.device_code || !data.user_code) {
     throw new Error(`Failed to request device code: ${res.status} ${res.statusText}`);
   }
-  const data = await res.json();
+  diag('INFO', `Device code issued (user_code ${data.user_code}, interval ${data.interval || 5}s, expires in ${data.expires_in || '?'}s).`);
   return {
     device_code: data.device_code,
     user_code: data.user_code,
@@ -245,23 +281,47 @@ async function pollCopilotAuth(deviceCode) {
       grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
     }),
   });
+  const { data } = await readJson(res, 'Device flow polling');
+
+  // The three outcomes are distinct on purpose: 'pending' keeps the panel
+  // polling, 'error' stops it with a message, and 'success' is the only one
+  // that may flip the UI to connected.
+  if (data.error) {
+    const pending = COPILOT_PENDING_ERRORS.has(data.error);
+    diag(pending ? 'INFO' : 'ERROR', `Poll: ${data.error}${data.error_description ? ' - ' + data.error_description : ''}`);
+    return {
+      status: pending ? 'pending' : 'error',
+      error: data.error,
+      error_description: data.error_description,
+      interval: data.interval,
+    };
+  }
+
   if (!res.ok) {
     throw new Error(`Polling request failed: ${res.status} ${res.statusText}`);
   }
-  const data = await res.json();
-  if (data.error) {
-    return { status: 'pending_or_error', error: data.error, error_description: data.error_description, interval: data.interval };
-  }
+
   if (data.access_token) {
     await chrome.storage.local.set({ github_oauth_token: data.access_token });
+    diag('INFO', 'GitHub OAuth token received; exchanging it for a Copilot session token.');
     try {
       const tokenInfo = await getOrRefreshCopilotToken(true);
+      diag('INFO', `Copilot session token obtained (expires_at ${tokenInfo.expires_at}, endpoints: ${tokenInfo.endpoints ? Object.keys(tokenInfo.endpoints).join(', ') : 'none'}).`);
       return { status: 'success', access_token: data.access_token, tokenInfo };
     } catch (tokenErr) {
-      return { status: 'pending_or_error', error: 'copilot_subscription_error', error_description: tokenErr.message };
+      // The GitHub side worked; only the Copilot entitlement check failed. Say
+      // so, or this reads as "the code you typed was wrong".
+      diag('ERROR', 'Copilot token exchange failed: ' + tokenErr.message);
+      return {
+        status: 'error',
+        error: 'copilot_subscription_error',
+        error_description: 'GitHub authorized the extension, but the Copilot token exchange failed: ' + tokenErr.message,
+      };
     }
   }
-  return { status: 'unknown', data };
+
+  diag('ERROR', 'Poll returned neither an error nor an access_token: ' + JSON.stringify(data).slice(0, 300));
+  return { status: 'error', error: 'unexpected_response', error_description: 'GitHub returned an unexpected device flow response.' };
 }
 
 async function fetchCopilotToken(oauthToken) {
@@ -312,7 +372,9 @@ async function getOrRefreshCopilotToken(forceRefresh = false) {
     };
   }
 
+  diag('INFO', 'Exchanging GitHub OAuth token at api.github.com/copilot_internal/v2/token…');
   const res = await fetchCopilotToken(oauthToken);
+  diag(res.ok ? 'INFO' : 'ERROR', 'Copilot token exchange responded ' + res.status + '.');
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');

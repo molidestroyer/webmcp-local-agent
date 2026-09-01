@@ -51,6 +51,28 @@ test('formatMessagesForCopilot formats user and assistant messages', () => {
   assert.equal(formatted[1].tool_calls[0].function.arguments, '{"query":"Ada"}');
 });
 
+test('endpointFor appends the path exactly once', () => {
+  // The token exchange hands back a bare API endpoint, but callers used to
+  // append /models themselves, which produced .../models/models.
+  assert.equal(
+    CopilotService.endpointFor('https://api.individual.githubcopilot.com', '/models'),
+    'https://api.individual.githubcopilot.com/models'
+  );
+  assert.equal(
+    CopilotService.endpointFor('https://api.individual.githubcopilot.com/models', '/models'),
+    'https://api.individual.githubcopilot.com/models'
+  );
+  assert.equal(
+    CopilotService.endpointFor('https://api.individual.githubcopilot.com/chat/completions', '/models'),
+    'https://api.individual.githubcopilot.com/models'
+  );
+  assert.equal(
+    CopilotService.endpointFor('https://api.individual.githubcopilot.com/', '/chat/completions'),
+    'https://api.individual.githubcopilot.com/chat/completions'
+  );
+  assert.equal(CopilotService.endpointFor(undefined, '/models'), null);
+});
+
 test('fetchCopilotModels returns models list array', async () => {
   const models = await CopilotService.fetchCopilotModels('fake-token');
   assert.ok(Array.isArray(models));

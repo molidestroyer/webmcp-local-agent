@@ -12,7 +12,7 @@
 const OLLAMA_HOSTS = ['http://127.0.0.1:11434', 'http://localhost:11434'];
 const MAX_TOOL_STEPS = 6;
 const HISTORY_LIMIT = 100;
-const TABS = ['chat', 'tools', 'execute', 'history', 'settings'];
+const TABS = ['chat', 'tools', 'execute', 'history', 'logs', 'settings'];
 
 // Ollama answers 403 to any origin missing from OLLAMA_ORIGINS, and
 // chrome-extension:// is not allowed by default. Chrome does not attach an
@@ -159,6 +159,7 @@ const state = {
   copilotConnected: false,
   copilotModels: [],
   copilotDeviceCode: null,
+  copilotDeviceExpiresAt: 0,
   copilotPollingTimer: null,
 };
 
@@ -331,22 +332,36 @@ async function fetchRemoteCopilotModels() {
     if (!tokenRes || !tokenRes.success || !tokenRes.token) {
       state.copilotModels = [];
       renderModelOptions();
+      showCopilotError((tokenRes && tokenRes.error)
+        || 'Could not obtain a Copilot session token. Reconnect GitHub Copilot in Settings.');
       return;
     }
 
     const Copilot = globalThis.__WebMCPCopilotService;
-    if (Copilot && typeof Copilot.fetchCopilotModels === 'function') {
-      const endpointUrl = tokenRes.endpoints && tokenRes.endpoints.api
-        ? (tokenRes.endpoints.api.replace(/\/$/, '') + '/models')
-        : undefined;
+    if (!Copilot || typeof Copilot.fetchCopilotModels !== 'function') {
+      state.copilotModels = [];
+      renderModelOptions();
+      showCopilotError('CopilotService library not loaded.');
+      return;
+    }
 
-      const dynamicModels = await Copilot.fetchCopilotModels(tokenRes.token, tokenRes.oauthToken, endpointUrl);
-      console.log('[Sidepanel] Dynamic Copilot models updated:', dynamicModels);
-      state.copilotModels = Array.isArray(dynamicModels) ? dynamicModels : [];
+    // The service appends /models itself; hand it the bare API endpoint or the
+    // URL ends up as .../models/models and only the hardcoded fallbacks work.
+    const endpointUrl = tokenRes.endpoints && tokenRes.endpoints.api
+      ? tokenRes.endpoints.api.replace(/\/+$/, '')
+      : undefined;
+
+    const dynamicModels = await Copilot.fetchCopilotModels(tokenRes.token, tokenRes.oauthToken, endpointUrl);
+    console.log('[Sidepanel] Dynamic Copilot models updated:', dynamicModels);
+    state.copilotModels = Array.isArray(dynamicModels) ? dynamicModels : [];
+    if (!state.copilotModels.length) {
+      showCopilotError('Connected, but GitHub returned no Copilot models. The Logs tab lists every endpoint tried and its status code.');
+    } else if (els.copilotErrorMsg) {
+      els.copilotErrorMsg.hidden = true;
     }
   } catch (err) {
-    console.warn('[Sidepanel] Failed to fetch Copilot models:', err);
     state.copilotModels = [];
+    showCopilotError('Failed to fetch Copilot models: ' + String((err && err.message) || err));
   }
   renderModelOptions();
 }
@@ -2014,6 +2029,11 @@ chrome.runtime.onMessage.addListener((message) => {
   }
   // The service worker tells us the front tab changed. It knows before we do,
   // and by the time it says so its bridge to that tab is reachable.
+  // Auth runs in the service worker, whose console the panel cannot see.
+  if (message.type === 'BG_LOG') {
+    appendLog(message.level || 'INFO', message.message);
+    return;
+  }
   if (message.type === 'active-tab') {
     if (message.windowId != null && state.windowId != null
         && message.windowId !== state.windowId) {
@@ -2044,15 +2064,42 @@ function renderCopilotStatus() {
   }
 }
 
+function showCopilotError(message) {
+  if (els.copilotErrorMsg) {
+    els.copilotErrorMsg.textContent = message;
+    els.copilotErrorMsg.hidden = false;
+  }
+  console.error('[Copilot] ' + message);
+}
+
 async function checkCopilotStatus() {
   const stored = await chrome.storage.local.get(['github_oauth_token', 'copilot_session_token']);
-  state.copilotConnected = Boolean(stored.github_oauth_token && stored.copilot_session_token);
-  renderCopilotStatus();
-  if (state.copilotConnected) {
-    await fetchRemoteCopilotModels();
-  } else {
+  if (!stored.github_oauth_token) {
+    state.copilotConnected = false;
+    renderCopilotStatus();
     renderModelOptions();
+    return;
   }
+
+  // The GitHub token outlives the Copilot session token, which expires in
+  // ~25 minutes. Holding only the former is the normal state after a while, not
+  // a disconnection: try the exchange before declaring us logged out.
+  if (!stored.copilot_session_token) {
+    const tokenRes = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'GET_OR_REFRESH_COPILOT_TOKEN', forceRefresh: true }, resolve);
+    });
+    if (!tokenRes || !tokenRes.success || !tokenRes.token) {
+      state.copilotConnected = false;
+      renderCopilotStatus();
+      renderModelOptions();
+      showCopilotError((tokenRes && tokenRes.error) || 'The stored GitHub token could not be exchanged for a Copilot session.');
+      return;
+    }
+  }
+
+  state.copilotConnected = true;
+  renderCopilotStatus();
+  await fetchRemoteCopilotModels();
 }
 
 async function startCopilotFlow() {
@@ -2069,6 +2116,8 @@ async function startCopilotFlow() {
     }
 
     state.copilotDeviceCode = res.device_code;
+    state.copilotDeviceExpiresAt = Date.now() + ((res.expires_in || 900) * 1000);
+    console.log('[Copilot] Device flow started. Enter ' + res.user_code + ' at ' + (res.verification_uri || 'https://github.com/login/device'));
     if (els.copilotUserCode) els.copilotUserCode.textContent = res.user_code;
     if (els.copilotVerifyLink) els.copilotVerifyLink.href = res.verification_uri || 'https://github.com/login/device';
 
@@ -2078,10 +2127,7 @@ async function startCopilotFlow() {
 
     pollCopilotFlow(res.device_code, res.interval || 5);
   } catch (err) {
-    if (els.copilotErrorMsg) {
-      els.copilotErrorMsg.textContent = String(err.message || err);
-      els.copilotErrorMsg.hidden = false;
-    }
+    showCopilotError(String(err.message || err));
   } finally {
     if (els.copilotConnectBtn) els.copilotConnectBtn.disabled = false;
   }
@@ -2093,6 +2139,7 @@ function cancelCopilotFlow() {
     state.copilotPollingTimer = null;
   }
   state.copilotDeviceCode = null;
+  state.copilotDeviceExpiresAt = 0;
   renderCopilotStatus();
 }
 
@@ -2102,27 +2149,45 @@ function pollCopilotFlow(deviceCode, intervalSec) {
   state.copilotPollingTimer = setTimeout(async () => {
     if (!state.copilotDeviceCode || state.copilotDeviceCode !== deviceCode) return;
 
+    if (state.copilotDeviceExpiresAt && Date.now() > state.copilotDeviceExpiresAt) {
+      cancelCopilotFlow();
+      showCopilotError('The device code expired before GitHub authorized it. Press Connect to get a new one.');
+      return;
+    }
+
     const res = await new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: 'POLL_COPILOT_AUTH', device_code: deviceCode }, resolve);
     });
 
+    // res.success only says the worker answered. Whether GitHub is done is
+    // res.status: 'pending' | 'success' | 'error'.
     if (!res || !res.success) {
-      if (res && res.error === 'authorization_pending') {
-        pollCopilotFlow(deviceCode, res.interval || intervalSec);
-      } else if (res && res.error === 'slow_down') {
-        pollCopilotFlow(deviceCode, (res.interval || intervalSec) + 5);
-      } else {
-        cancelCopilotFlow();
-        if (els.copilotErrorMsg) {
-          els.copilotErrorMsg.textContent = (res && res.error_description) || (res && res.error) || 'Authorization failed.';
-          els.copilotErrorMsg.hidden = false;
-        }
+      cancelCopilotFlow();
+      showCopilotError((res && res.error) || 'The service worker did not answer the polling request.');
+      return;
+    }
+
+    if (res.status === 'pending') {
+      const wait = (res.interval || intervalSec) + (res.error === 'slow_down' ? 5 : 0);
+      if (els.copilotPollingText) {
+        els.copilotPollingText.textContent = res.error === 'slow_down'
+          ? 'GitHub asked us to slow down; retrying in ' + wait + 's…'
+          : 'Waiting for GitHub approval…';
       }
+      pollCopilotFlow(deviceCode, wait);
+      return;
+    }
+
+    if (res.status !== 'success') {
+      cancelCopilotFlow();
+      showCopilotError(res.error_description || res.error || 'Authorization failed.');
       return;
     }
 
     cancelCopilotFlow();
     state.copilotConnected = true;
+    if (els.copilotErrorMsg) els.copilotErrorMsg.hidden = true;
+    console.log('[Copilot] Device flow completed; session token stored.');
     renderCopilotStatus();
     await fetchRemoteCopilotModels();
     fetchLocalModels();
