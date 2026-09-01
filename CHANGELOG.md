@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.17
+## 0.6.20
 
 Interactive Declarative/JS tool toggles, in-chat history drawer & catalog auto-resolution:
 - **Interactive Declarative vs JS Tool Toggle**: Added live mode switch on `webmcp-contacts-demo.html` to toggle between JavaScript API registration (`modelContext`) and HTML Form Declarative registration (`<form toolname="...">` with `toolautosubmit="true|false"`).
