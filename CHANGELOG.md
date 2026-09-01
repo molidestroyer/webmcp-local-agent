@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.26
+
+- Vídeo del README rehecho: la URL del repo se cortaba en el rótulo de cierre
+  (`GITHUB.COM/MOLIDI…`) porque el componente no admitía un título tan largo — ahora va en
+  el subtítulo, entera y en minúsculas. Y el audio ya no se corta al acabar la locución.
+
 ## 0.6.25
 
 - Vídeo de demostración (1:46, 16:9, narración en inglés) en el README, con `docs/demo.mp4`
