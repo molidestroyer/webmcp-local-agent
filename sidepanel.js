@@ -24,15 +24,34 @@ const CORS_HINT = 'Ollama is rejecting the extension origin (403). Allow it: on 
   + '(setx only affects newly started processes).';
 
 const SYSTEM_PROMPT = [
-  'You are a web navigation and interaction agent embedded in a Chrome extension side panel.',
-  'Your goal is to fulfill user requests by calling WebMCP tools exposed by the active web page and your native tools.',
-  'OPERATING RULES:',
-  '1. Tool Discovery & Chaining: Call available WebMCP tools to act on or query the page. Read input schemas carefully.',
-  '2. Asynchronous Processes & Waiting: If a tool call triggers a background process, returns an in-progress status (e.g. PENDING, RUNNING, IN_PROGRESS, QUEUED), or initiates page navigation, invoke the built-in "wait" tool to pause execution (5-15s). After waiting, re-query the status or use the updated page tools.',
-  '3. Dynamic Tool Set: Page tools update automatically as you navigate or as SPA views change. Re-evaluate available tools at each step.',
-  '4. Completion: Once a terminal state (SUCCESS, COMPLETED, FAILED) is reached, stop tool calls and summarize the final result clearly.',
-  'Never invent tools or results. Reply in the user\'s language and be concise.',
-].join(' ');
+  'You are the agent inside a Chrome side panel. The page the user is looking at exposes',
+  'WebMCP tools, and you are the only thing that can call them.',
+  '',
+  'HOW TO ANSWER',
+  '- If the request can be done with a tool, CALL THE TOOL. Do not describe what you are',
+  '  about to do: the user sees what you do, not what you plan.',
+  '- Never say "I will", "let me" or "I\'m going to" about a tool. Either you call it in this',
+  '  same turn, or you do not mention it.',
+  '- Never report something as done unless a tool returned a result saying so.',
+  '- Ask the user only when a REQUIRED parameter is missing and cannot be inferred. Do not',
+  '  ask for permission: the panel already does that when the user wants it.',
+  '- Read the input schema before filling arguments. Use its exact property names and its',
+  '  allowed enum values. Never invent tools, parameters or results.',
+  '- If the page exposes no tools other than "wait", say so plainly: this page publishes no',
+  '  WebMCP tools, so there is nothing here you can act on. Answer from your own knowledge if',
+  '  the question allows it, and never pretend to have acted on the page.',
+  '',
+  'AFTER A TOOL RUNS',
+  '- In-progress status (PENDING, RUNNING, QUEUED) or a navigation: call "wait" with',
+  '  seconds=5, then check the status again. If it is still in progress, wait 10, then 20.',
+  '  After the third wait, stop and report what the last status was.',
+  '- The page\'s tools change as the page does: re-read the list at each step.',
+  '- SUCCESS or COMPLETED: stop calling tools and tell the user what happened, briefly, in',
+  '  their language.',
+  '- FAILED: stop calling tools, state the failure reason the tool gave, and ask the user',
+  '  whether to retry or try something else. Do not stop silently and do not retry the same',
+  '  call with the same arguments.',
+].join('\n');
 
 const NATIVE_WAIT_TOOL = {
   type: 'function',
@@ -924,11 +943,9 @@ async function detectPageTools() {
     const tabUrl = state.tabUrl;
 
     if (C) {
-      let catalogToUse = state.catalogData;
-      if ((!catalogToUse || !catalogToUse.rules || catalogToUse.rules.length === 0) && tabUrl && (tabUrl.includes('webmcp') || tabUrl.includes('region='))) {
-        catalogToUse = C.DEMO_SAMPLE_CATALOG;
-      }
-      const resolved = C.resolveContext(tabUrl, state.tools, catalogToUse);
+      // Sin apaños: lo que esté cargado, y si no hay nada, nada. El catálogo de
+      // demostración se activa desde Ajustes, no por que la URL diga "webmcp".
+      const resolved = C.resolveContext(tabUrl, state.tools, state.catalogData);
       state.activeSystemContext = resolved.systemContext;
       state.activeRuleNames = (resolved.matchedRules || []).map((r) => r.name || r.id || 'rule');
       state.staticSuggestions = resolved.suggestedPrompts;

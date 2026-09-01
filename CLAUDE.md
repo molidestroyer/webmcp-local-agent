@@ -234,6 +234,27 @@ exchanged for a short-lived session token (~25 min) plus an `endpoints` object.
 - Host permissions: `github.com` and `api.github.com` are listed explicitly,
   `api*.githubcopilot.com` is covered by `<all_urls>`.
 
+## El system prompt
+
+Lo que un modelo pequeño hace mal por defecto es **narrar en vez de llamar**: contesta "ahora
+creo el contacto" y se queda tan ancho. El prompt tiene que atacar eso explícitamente, y el
+orden importa — lo primero que se lee pesa más:
+
+- `CALL THE TOOL` va **primero**. La versión hasta 0.6.23 abría con "lee los esquemas" y su
+  única regla enfática era la de *esperar*.
+- Prohibir el anuncio ("I will", "let me") explícitamente, y prohibir dar algo por hecho sin
+  resultado de tool.
+- Distinguir **preguntar por un parámetro obligatorio** de **pedir permiso**: lo segundo ya
+  lo hace la casilla *Confirm every tool*, y un modelo que pide permiso parece colgado.
+- Nada de rangos sin criterio: el `wait` es **5 → 10 → 20 y parar**, dentro del `1..30` que
+  declara `NATIVE_WAIT_TOOL`. Un "espera entre 5 y 15 s" no le da al modelo forma de elegir.
+- Casos que hay que cubrir o el modelo improvisa: **FAILED** (explicar y preguntar, no
+  reintentar igual) y **página sin tools** (decirlo, no fingir que ha actuado).
+
+Se une con `
+`. Con `.join(' ')` la lista se deshace en un párrafo y se pierde la
+estructura que hace que un modelo pequeño la siga.
+
 ## Catálogo: resolver no es aplicar
 
 `resolveContext()` devuelve el `systemContext` de las reglas que casan con la pestaña,

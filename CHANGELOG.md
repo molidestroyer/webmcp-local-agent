@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.24
+
+System prompt reescrito y "None" pasa a significar none:
+- **El prompt no le decía al modelo que actuara.** De sus cuatro reglas, la única con un
+  imperativo claro era la de *esperar*; nada prohibía anunciar la acción, y `be concise`
+  cerraba el prompt empujando a prosa. De ahí el "ahora te lo creo" sin llamada. El nuevo
+  empieza por CALL THE TOOL, prohíbe el "I will / let me", separa *preguntar por un
+  parámetro obligatorio* de *pedir permiso* (que ya hace la casilla del panel), y prohíbe
+  dar algo por hecho sin resultado de tool.
+- Cerrados los tres hallazgos del linter de instrucciones: el `wait` de "5-15s" pasa a
+  **5 → 10 → 20 y parar** (cabe en el `1..30` de la tool nativa); FAILED tiene su propia
+  rama (explicar el motivo, preguntar, no reintentar con los mismos argumentos); y hay
+  regla para la página **sin tools**.
+- Se une con `
+`: antes iba con espacios y al modelo le llegaba un párrafo corrido.
+- **El catálogo de demostración se colaba con "None" seleccionado** en cualquier URL que
+  llevara "webmcp" o "region=". Desde 0.6.23 esas reglas van dentro del mensaje de
+  sistema, así que el apaño ya no era solo cosmético. Fuera.
+
 ## 0.6.23
 
 El catálogo por fin llega al chat, y el proveedor deja de ser siempre Ollama:
