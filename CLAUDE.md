@@ -234,6 +234,35 @@ exchanged for a short-lived session token (~25 min) plus an `endpoints` object.
 - Host permissions: `github.com` and `api.github.com` are listed explicitly,
   `api*.githubcopilot.com` is covered by `<all_urls>`.
 
+## Chat threads
+
+The Chat tab is two sub-views over one `state`: `#chat-threads-view` (the picker) and
+`#chat-active-view`. `state.chatSessions` lives in `chrome.storage.local`, and the picker
+filters it by the active tab's domain.
+
+- **A new thread needs a new `currentSessionId`.** `resetConversation()` only clears the
+  messages; leaving the id alone means the next `saveCurrentChatSession()` finds the thread
+  you just left and overwrites it. `startNewSession()` is the only correct entry point for
+  the two "New" buttons.
+- `saveCurrentChatSession()` rederives the title from the first user message on **every**
+  save, so a name the user chose — typed after a double-click, or written by ✨ — is
+  flagged `titleCustom` and skipped. Drop that flag and renaming silently undoes itself on
+  the next message.
+- Both headers use the same three-slot grid (`1fr auto 1fr`) so the centre column is
+  centred in the panel, not between the buttons. The thread picker's left slot is
+  deliberately an empty div: remove it and the title drifts left.
+- `renderChatHeader()` refuses to touch the title while `dataset.renaming` is set — it is
+  called from several places that would otherwise wipe the input mid-rename.
+
+## Catalog status is derived, never remembered
+
+`renderCatalogStatus()` computes the badge from `state.catalogSourceMode` +
+`state.catalogData`. It used to be written inline by `syncCatalog()` only, which meant a
+panel reopened after a sync — the panel is destroyed every time it closes — restored the
+cached catalog, listed its rules in the inspector, and still displayed "No Catalog Active ·
+0 rules loaded" above them. Anything shown about the catalog must be computed from state,
+because the sync that produced it happened in a previous life of the panel.
+
 ## Talking to Copilot (OpenAI shape, not Ollama shape)
 
 `runAgent()` builds **one** tool array, mapped through `toOllamaTool()` and prefixed with

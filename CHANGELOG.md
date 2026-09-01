@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.22
+
+Chat header, conversation naming, and the catalog card telling the truth again:
+- **The chat header had no CSS at all.** `.chat-header` and its children were never
+  styled, so the buttons sat flush against everything and the title rendered as plain
+  body text. It is now a three-slot grid — back button, centred title, new-chat button —
+  with equal side columns so the title is centred whatever the buttons say, and the
+  header buttons no longer borrow `.btn-small`'s red hover, which is the colour of
+  destructive actions.
+- **The catalog card said "No Catalog Active · 0 rules loaded" whenever the panel was
+  reopened**, even with a catalog loaded and working: the badge was written inline by
+  `syncCatalog()` and nothing restored it from the cache at startup. `renderCatalogStatus()`
+  now derives it from what is actually loaded, and the remote sync time is persisted.
+- The domain a conversation belongs to has been stored all along but was never shown.
+  It is now on every thread card and under the header title.
+- **Rename a conversation by double-clicking its title**, in the header or on the card.
+  A chosen name is flagged `titleCustom` so the next save does not rewrite it from the
+  first message.
+- **✨ on each thread card asks the model to name the conversation.** Works with whichever
+  provider is selected: `askModel()` is the one-shot path both this and the prompt
+  suggestions use.
+- **"New Chat" no longer overwrites the thread you just left.** It only cleared the
+  messages while keeping `currentSessionId`, so the next message replaced the previous
+  conversation instead of starting one beside it.
+
 ## 0.6.21
 
 Fix declarative tool execution timeout & enrich contacts list UI details:

@@ -72,6 +72,8 @@ const els = {
   chatThreadsList: document.getElementById('chat-threads-list'),
   chatBackBtn: document.getElementById('chat-back-btn'),
   chatThreadTitle: document.getElementById('chat-thread-title'),
+  chatThreadDomain: document.getElementById('chat-thread-domain'),
+  threadsDomain: document.getElementById('threads-domain'),
   chatNewBtn: document.getElementById('chat-new-btn'),
   threadsNewBtn: document.getElementById('threads-new-btn'),
   composer: document.getElementById('composer'),
@@ -165,6 +167,7 @@ const state = {
   catalogUrl: '',
   catalogToken: '',
   catalogData: null,
+  catalogSyncedAt: 0,
   activeSystemContext: '',
   copilotConnected: false,
   copilotModels: [],
@@ -469,6 +472,53 @@ function recentConversationSummary() {
     .join('\n');
 }
 
+/**
+ * Paints the catalog badge from what is actually loaded.
+ *
+ * This used to be written inline by syncCatalog() alone, so a panel that had
+ * just been reopened — which happens every time you close it — restored the
+ * cached catalog and its rules but still read "No Catalog Active · 0 rules
+ * loaded". The catalog was working; only the card said otherwise.
+ */
+function renderCatalogStatus() {
+  if (!els.catalogStatusBadge || !els.catalogStatusMeta) return;
+
+  const rules = state.catalogData && Array.isArray(state.catalogData.rules)
+    ? state.catalogData.rules
+    : [];
+
+  if (state.catalogSourceMode === 'demo') {
+    els.catalogStatusBadge.className = 'chip chip--ok';
+    els.catalogStatusBadge.textContent = 'Demo Catalog Active';
+    els.catalogStatusMeta.textContent = `${rules.length} sample rules loaded`;
+    return;
+  }
+
+  if (state.catalogSourceMode === 'remote') {
+    if (!rules.length) {
+      els.catalogStatusBadge.className = 'chip pill--muted';
+      els.catalogStatusBadge.textContent = 'Remote Catalog Not Synced';
+      els.catalogStatusMeta.textContent = state.catalogUrl
+        ? 'Press "Sync Catalog Now" to load it'
+        : 'Enter a valid catalog JSON URL';
+      return;
+    }
+    els.catalogStatusBadge.className = 'chip chip--ok';
+    els.catalogStatusBadge.textContent = 'Remote Catalog Synced';
+    const when = state.catalogSyncedAt
+      ? new Date(state.catalogSyncedAt).toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+      : null;
+    els.catalogStatusMeta.textContent = when
+      ? `✔ Synced ${when} · ${rules.length} rules`
+      : `${rules.length} rules loaded`;
+    return;
+  }
+
+  els.catalogStatusBadge.className = 'chip pill--muted';
+  els.catalogStatusBadge.textContent = 'No Catalog Active';
+  els.catalogStatusMeta.textContent = '0 rules loaded';
+}
+
 function renderCatalogRulesInspector() {
   if (!els.catalogRulesList) return;
   els.catalogRulesList.textContent = '';
@@ -523,13 +573,7 @@ async function syncCatalog() {
 
   if (mode === 'none') {
     state.catalogData = C.EMPTY_CATALOG;
-    if (els.catalogStatusBadge) {
-      els.catalogStatusBadge.className = 'chip pill--muted';
-      els.catalogStatusBadge.textContent = 'No Catalog Active';
-    }
-    if (els.catalogStatusMeta) {
-      els.catalogStatusMeta.textContent = '0 rules loaded';
-    }
+    renderCatalogStatus();
     renderCatalogRulesInspector();
     await chrome.storage.local.set({
       catalogSourceMode: 'none',
@@ -541,13 +585,7 @@ async function syncCatalog() {
 
   if (mode === 'demo') {
     state.catalogData = C.DEMO_SAMPLE_CATALOG;
-    if (els.catalogStatusBadge) {
-      els.catalogStatusBadge.className = 'chip chip--ok';
-      els.catalogStatusBadge.textContent = 'Demo Catalog Active';
-    }
-    if (els.catalogStatusMeta) {
-      els.catalogStatusMeta.textContent = `${C.DEMO_SAMPLE_CATALOG.rules.length} sample rules loaded`;
-    }
+    renderCatalogStatus();
     renderCatalogRulesInspector();
     await chrome.storage.local.set({
       catalogSourceMode: 'demo',
@@ -589,21 +627,15 @@ async function syncCatalog() {
     }
 
     state.catalogData = res.data;
-    const ruleCount = state.catalogData.rules.length;
-    if (els.catalogStatusBadge) {
-      els.catalogStatusBadge.className = 'chip chip--ok';
-      els.catalogStatusBadge.textContent = 'Remote Catalog Synced';
-    }
-    if (els.catalogStatusMeta) {
-      const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      els.catalogStatusMeta.textContent = `✔ Synced at ${nowStr} · ${ruleCount} rules`;
-    }
+    state.catalogSyncedAt = Date.now();
+    renderCatalogStatus();
 
     renderCatalogRulesInspector();
     await chrome.storage.local.set({
       catalogSourceMode: 'remote',
       catalogUrl: url,
       catalogToken: token,
+      catalogSyncedAt: state.catalogSyncedAt,
       webmcp_catalog_cache: state.catalogData,
     });
     detectPageTools();
@@ -2034,6 +2066,191 @@ els.clearChat.addEventListener('click', () => {
   generatePromptSuggestions();
 });
 
+/**
+ * One-shot question to whichever provider is selected. The tool-calling loop
+ * lives in runAgent(); this is for the small side questions (suggestions,
+ * conversation titles) that only need text back.
+ */
+async function askModel(prompt, signal) {
+  if (!state.model) throw new Error('No model selected.');
+
+  if (state.model.startsWith('copilot:')) {
+    const reply = await copilotChat([{ role: 'user', content: prompt }], undefined, () => {});
+    return (reply && reply.content) || '';
+  }
+
+  const response = await fetch(state.host + '/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: state.model,
+      messages: [{ role: 'user', content: prompt }],
+      stream: false,
+    }),
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error('Model provider responded ' + response.status + '.');
+  }
+  const data = await response.json();
+  return (data.message && data.message.content) || '';
+}
+
+function currentDomain() {
+  try {
+    return state.tabUrl ? new URL(state.tabUrl).hostname : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function currentSession() {
+  return (state.chatSessions || []).find((s) => s.id === state.currentSessionId) || null;
+}
+
+/** Title and origin of the thread on screen. */
+function renderChatHeader() {
+  const session = currentSession();
+  const domain = currentDomain();
+
+  // Never overwrite the input the user is typing a new name into.
+  if (els.chatThreadTitle && els.chatThreadTitle.dataset.renaming !== '1') {
+    els.chatThreadTitle.textContent = (session && session.title) || 'New conversation';
+  }
+  if (els.chatThreadDomain) {
+    els.chatThreadDomain.textContent = (session && session.domain) || domain || '';
+  }
+  if (els.threadsDomain) {
+    els.threadsDomain.textContent = domain || 'this page';
+  }
+}
+
+/**
+ * Renames a thread in place: the title becomes an input until Enter or blur
+ * saves it, Escape cancels.
+ */
+function renameSessionInline(el, session, inputClass, afterSave) {
+  if (!session || !el || el.dataset.renaming === '1') return;
+  el.dataset.renaming = '1';
+
+  const previous = session.title || '';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = inputClass;
+  input.value = previous;
+  input.maxLength = 80;
+  el.textContent = '';
+  el.appendChild(input);
+  input.focus();
+  input.select();
+
+  let settled = false;
+  const finish = (save) => {
+    if (settled) return;
+    settled = true;
+    delete el.dataset.renaming;
+    const next = input.value.trim();
+    if (save && next && next !== previous) {
+      applySessionTitle(session, next);
+    }
+    if (afterSave) afterSave();
+  };
+
+  input.addEventListener('keydown', (event) => {
+    event.stopPropagation();
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      finish(true);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      finish(false);
+    }
+  });
+  input.addEventListener('blur', () => finish(true));
+  input.addEventListener('click', (event) => event.stopPropagation());
+  input.addEventListener('dblclick', (event) => event.stopPropagation());
+}
+
+/**
+ * A title the user chose — by hand or by asking the model — outranks the one
+ * derived from the first message, which saveCurrentChatSession() rewrites on
+ * every save and would otherwise undo the rename on the next message.
+ */
+function applySessionTitle(session, title) {
+  session.title = title;
+  session.titleCustom = true;
+  session.updatedAt = Date.now();
+  chrome.storage.local.set({ chatSessions: state.chatSessions });
+  renderChatHeader();
+}
+
+/** Asks the model for a short name for a thread. */
+async function generateSessionTitle(session, button) {
+  const turns = (session.messages || [])
+    .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content)
+    .slice(0, 8)
+    .map((m) => `${m.role}: ${String(m.content).slice(0, 300)}`)
+    .join('\n');
+
+  if (!turns) {
+    showStatus('That conversation has nothing to summarize yet.');
+    return;
+  }
+  if (!state.model) {
+    showStatus('Pick a model first: the title is written by the model.');
+    return;
+  }
+
+  const label = button ? button.textContent : null;
+  if (button) {
+    button.disabled = true;
+    button.textContent = '⏳';
+  }
+
+  const prompt = 'Below is a conversation between a user and a web agent.\n\n'
+    + turns
+    + '\n\nWrite a title for it: at most 6 words, no quotes, no trailing period, '
+    + 'in the same language the user is writing in. Answer with the title alone and nothing else.';
+
+  try {
+    const raw = await askModel(prompt);
+    const title = String(raw)
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)[0] || '';
+    const clean = title.replace(/^["'\s]+/, '').replace(/["'\s.]+$/, '').slice(0, 60);
+    if (!clean) {
+      showStatus('The model returned no usable title.');
+      return;
+    }
+    applySessionTitle(session, clean);
+    renderChatThreadsView();
+  } catch (err) {
+    showStatus('Could not generate a title: ' + String((err && err.message) || err));
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = label || '✨';
+    }
+  }
+}
+
+/**
+ * Leaves the current thread saved and starts a genuinely new one.
+ *
+ * resetConversation() only clears the messages: keeping the same
+ * currentSessionId meant the next message overwrote the thread you had just
+ * left instead of creating one beside it.
+ */
+function startNewSession() {
+  saveCurrentChatSession();
+  state.currentSessionId = 'session-' + Date.now();
+  resetConversation();
+  renderChatHeader();
+  generatePromptSuggestions();
+  setChatSubView('chat');
+}
+
 function saveCurrentChatSession() {
   const userMsgs = (state.messages || []).filter((m) => m.role === 'user');
   if (userMsgs.length === 0) return;
@@ -2047,7 +2264,7 @@ function saveCurrentChatSession() {
 
   let session = (state.chatSessions || []).find((s) => s.id === state.currentSessionId);
   if (session) {
-    session.title = title;
+    if (!session.titleCustom) session.title = title;
     session.messages = [...state.messages];
     session.updatedAt = Date.now();
     session.url = state.tabUrl;
@@ -2065,6 +2282,7 @@ function saveCurrentChatSession() {
   }
 
   chrome.storage.local.set({ chatSessions: state.chatSessions });
+  renderChatHeader();
 }
 
 function loadChatSession(session) {
@@ -2076,11 +2294,13 @@ function loadChatSession(session) {
     if (m.role !== 'system') addMessage(m.role, m.content);
   }
 
+  renderChatHeader();
   setChatSubView('chat');
 }
 
 function setChatSubView(subView) {
   state.chatSubView = subView;
+  renderChatHeader();
   if (subView === 'threads') {
     if (els.chatThreadsView) els.chatThreadsView.hidden = false;
     if (els.chatActiveView) els.chatActiveView.hidden = true;
@@ -2131,14 +2351,38 @@ function renderChatThreadsView() {
     const titleEl = document.createElement('div');
     titleEl.className = 'thread-card__title';
     titleEl.textContent = s.title || 'Untitled Thread';
+    titleEl.title = 'Double-click to rename';
+    titleEl.addEventListener('dblclick', (event) => {
+      event.stopPropagation();
+      renameSessionInline(titleEl, s, 'thread-card__rename', renderChatThreadsView);
+    });
 
     const metaEl = document.createElement('div');
     metaEl.className = 'thread-card__meta';
     const msgCount = (s.messages || []).filter((m) => m.role !== 'system').length;
     const time = new Date(s.updatedAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    metaEl.textContent = `${msgCount} msg${msgCount === 1 ? '' : 's'} · ${time}`;
+    // The domain is what makes a thread recognizable once you have several from
+    // different pages; it has been stored all along but never shown.
+    if (s.domain) {
+      const domainEl = document.createElement('span');
+      domainEl.className = 'thread-card__domain';
+      domainEl.textContent = s.domain;
+      metaEl.append(domainEl, document.createTextNode(` · ${msgCount} msg${msgCount === 1 ? '' : 's'} · ${time}`));
+    } else {
+      metaEl.textContent = `${msgCount} msg${msgCount === 1 ? '' : 's'} · ${time}`;
+    }
 
     info.append(titleEl, metaEl);
+
+    const genBtn = document.createElement('button');
+    genBtn.type = 'button';
+    genBtn.className = 'thread-card__gen';
+    genBtn.textContent = '✨';
+    genBtn.title = 'Name this conversation with the model';
+    genBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      generateSessionTitle(s, genBtn);
+    });
 
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
@@ -2155,7 +2399,11 @@ function renderChatThreadsView() {
       renderChatThreadsView();
     });
 
-    card.append(info, delBtn);
+    const actions = document.createElement('div');
+    actions.className = 'thread-card__actions';
+    actions.append(genBtn, delBtn);
+
+    card.append(info, actions);
     card.addEventListener('click', () => loadChatSession(s));
     els.chatThreadsList.appendChild(card);
   }
@@ -2166,20 +2414,21 @@ if (els.chatBackBtn) {
 }
 
 if (els.chatNewBtn) {
-  els.chatNewBtn.addEventListener('click', () => {
-    saveCurrentChatSession();
-    resetConversation();
-    generatePromptSuggestions();
-    setChatSubView('chat');
-  });
+  els.chatNewBtn.addEventListener('click', startNewSession);
 }
 
 if (els.threadsNewBtn) {
-  els.threadsNewBtn.addEventListener('click', () => {
-    saveCurrentChatSession();
-    resetConversation();
-    generatePromptSuggestions();
-    setChatSubView('chat');
+  els.threadsNewBtn.addEventListener('click', startNewSession);
+}
+
+if (els.chatThreadTitle) {
+  els.chatThreadTitle.addEventListener('dblclick', () => {
+    const session = currentSession();
+    if (!session) {
+      showStatus('Send a message first: an empty conversation has nothing to name yet.');
+      return;
+    }
+    renameSessionInline(els.chatThreadTitle, session, 'chat-header__rename', renderChatHeader);
   });
 }
 
@@ -2418,6 +2667,7 @@ if (els.copilotCopyCodeBtn) {
     'catalogSourceMode',
     'catalogUrl',
     'catalogToken',
+    'catalogSyncedAt',
     'webmcp_catalog_cache',
     'chatSessions',
   ]);
@@ -2432,6 +2682,7 @@ if (els.copilotCopyCodeBtn) {
   state.catalogSourceMode = stored.catalogSourceMode || 'none';
   state.catalogUrl = stored.catalogUrl || '';
   state.catalogToken = stored.catalogToken || '';
+  state.catalogSyncedAt = stored.catalogSyncedAt || 0;
 
   if (els.catalogSourceRemote && state.catalogSourceMode === 'remote') {
     els.catalogSourceRemote.checked = true;
@@ -2455,7 +2706,9 @@ if (els.copilotCopyCodeBtn) {
     state.catalogData = C.EMPTY_CATALOG;
   }
 
+  renderCatalogStatus();
   renderCatalogRulesInspector();
+  renderChatHeader();
   setTab(stored.activeTab || 'chat');
 
   await loadHistory();

@@ -1058,6 +1058,97 @@ body {
   display: none !important;
 }
 
+/* Three slots of equal side width, so the title sits dead centre whatever the
+   buttons say — and it stays centred when one side is empty, as it is in the
+   thread picker. */
+.chat-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-header__side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chat-header__side--end { justify-content: flex-end; }
+
+.chat-header__center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+  padding: 0 4px;
+}
+
+.chat-header__title {
+  max-width: 100%;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
+.chat-header__domain {
+  max-width: 100%;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-header__domain:empty { display: none; }
+
+/* Not .btn-small: that one hovers red, which is the colour of destructive
+   actions and reads as a warning on "New chat". */
+.chat-header__btn {
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.chat-header__btn:hover {
+  color: var(--accent-text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* The title turns into this while being renamed. */
+.chat-header__rename,
+.thread-card__rename {
+  width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
 .chat-threads-list {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -1110,7 +1201,24 @@ body {
 .thread-card__meta {
   font-size: 10.5px;
   color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
+.thread-card__domain {
+  font-family: var(--mono);
+  color: var(--text-faint);
+}
+
+.thread-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.thread-card__title--editing { cursor: text; }
 
 .thread-card__del {
   background: transparent;
@@ -1125,6 +1233,26 @@ body {
 .thread-card__del:hover {
   color: #ef4444;
   background: rgba(239, 68, 68, 0.1);
+}
+
+.thread-card__gen {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  font-size: 13px;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.thread-card__gen:hover {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+.thread-card__gen:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 
