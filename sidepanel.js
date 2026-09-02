@@ -12,6 +12,9 @@
 const OLLAMA_HOSTS = ['http://127.0.0.1:11434', 'http://localhost:11434'];
 const MAX_TOOL_STEPS = 6;
 const HISTORY_LIMIT = 100;
+// Local models (Ollama) can take much longer than Copilot to answer a suggestion
+// request, especially on first load when the model has to be paged into VRAM.
+const SUGGESTION_TIMEOUT_MS = 45000;
 const TABS = ['chat', 'tools', 'execute', 'history', 'logs', 'settings'];
 
 // Ollama answers 403 to any origin missing from OLLAMA_ORIGINS, and
@@ -768,9 +771,11 @@ async function generatePromptSuggestions() {
     suggestAbortController.abort();
   }
   suggestAbortController = new AbortController();
+  let suggestTimedOut = false;
   const timeoutId = setTimeout(() => {
+    suggestTimedOut = true;
     if (suggestAbortController) suggestAbortController.abort();
-  }, 15000);
+  }, SUGGESTION_TIMEOUT_MS);
   const signal = suggestAbortController.signal;
 
   state.suggesting = true;
@@ -834,7 +839,14 @@ async function generatePromptSuggestions() {
       content = (data.message && data.message.content) || '';
     }
 
-    if (signal.aborted) return;
+    if (signal.aborted) {
+      // copilotChat() above isn't wired to `signal`, so a timeout during a Copilot
+      // request doesn't cancel it — it just lands here once it finally resolves.
+      if (suggestTimedOut) {
+        logResult(false, `Timed out after ${SUGGESTION_TIMEOUT_MS / 1000}s waiting for the model to generate suggestions.`);
+      }
+      return;
+    }
 
     content = content.trim();
     if (content.startsWith('```')) {
@@ -868,7 +880,14 @@ async function generatePromptSuggestions() {
     renderSuggestions();
     logResult(true, validSuggestions.join(' | '));
   } catch (err) {
-    if (err && err.name === 'AbortError') return;
+    if (err && err.name === 'AbortError') {
+      // Only a real timeout is worth logging: a newer suggestion request aborting
+      // this one (suggestAbortController.abort() above) is expected and silent.
+      if (suggestTimedOut) {
+        logResult(false, `Timed out after ${SUGGESTION_TIMEOUT_MS / 1000}s waiting for the model to generate suggestions.`);
+      }
+      return;
+    }
     state.aiSuggestions = [];
     renderSuggestions();
     logResult(false, String((err && err.message) || err));

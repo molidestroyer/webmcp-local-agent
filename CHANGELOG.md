@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.27
+
+- Las sugerencias de prompt (`generatePromptSuggestions`) desaparecían en silencio al
+  agotar el timeout de 15s, sin dejar rastro en History — reproducible con modelos locales
+  lentos como Gemma. Timeout subido a 45s y el caso de timeout ahora se loguea de forma
+  explícita en los dos caminos que lo tragaban: el `AbortError` de la petición a Ollama, y
+  el resultado descartado en silencio en la ruta Copilot (`copilotChat()` no está cableado
+  a la `signal` de abort, así que el timeout no cancelaba esa petición, solo hacía que su
+  resultado se tirase al llegar).
+
 ## 0.6.26
 
 - Vídeo del README rehecho: la URL del repo se cortaba en el rótulo de cierre
