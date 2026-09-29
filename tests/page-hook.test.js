@@ -135,6 +135,25 @@ test('reads tools from document.modelContext.getTools()', async () => {
   assert.deepStrictEqual(result.tools[0].inputSchema.properties.a, { type: 'string' });
 });
 
+test('a tool removed from the live listing is not retained across an SPA route change', async () => {
+  let liveTools = [{ name: 'routeTool', origin: 'https://app.test', inputSchema: '{}' }];
+  const hook = bootHook({
+    modelContext: {
+      getTools: async () => liveTools,
+      executeTool: async () => 'ok',
+    },
+  });
+
+  const beforeNavigation = await hook.ask('list', null);
+  assert.deepStrictEqual(named(beforeNavigation.result), ['routeTool']);
+
+  // The same document and ModelContext survive an SPA navigation, but the
+  // platform's current tool set is now empty.
+  liveTools = [];
+  const afterNavigation = await hook.ask('list', null);
+  assert.deepStrictEqual(named(afterNavigation.result), []);
+});
+
 test('a page with no WebMCP surface answers an empty listing, not an error', async () => {
   const hook = bootHook({});
   const { result, error } = await hook.ask('list', null);
