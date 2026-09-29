@@ -206,7 +206,15 @@
     const keepExisting = Boolean(options && options.keepExisting);
     if (!tool || typeof tool !== 'object' || typeof tool.name !== 'string') return;
     if (options && options.viaScript) registeredByScript.add(tool.name);
-    if (keepExisting && registry.has(tool.name)) return;
+    if (keepExisting && registry.has(tool.name)) {
+      // A wrapper may have already recorded this tool before getTools() sees
+      // it. Preserve the wrapper's executor, but remember that the platform
+      // has now confirmed it belongs to this context's live listing.
+      if (options && options.fromLiveListing) {
+        registry.get(tool.name).seenInLiveListing = true;
+      }
+      return;
+    }
 
     // The native API serialises inputSchema to a JSON string; imperative
     // registrations pass an object. Normalise here so nothing downstream has to
@@ -228,8 +236,31 @@
       },
       execute: executorOf(tool),
       viaScript: Boolean(options && options.viaScript),
+      // Keep legacy wrapper-only registrations, but reconcile tools that a
+      // live getTools() listing has confirmed on each later listing.
+      seenInLiveListing: Boolean(options && options.fromLiveListing),
       source,
     });
+  }
+
+  /**
+   * getTools() is the authoritative native view of a context. The registry is
+   * still needed for legacy wrapper-only APIs, but retaining a tool that was
+   * previously returned by getTools() after it disappears is stale state on an
+   * SPA route change. Do not evict wrapper-only entries which have never been
+   * confirmed by getTools(): old/polyfilled contexts can expose those through
+   * registerTool()/provideContext() without listing them.
+   */
+  function reconcileLiveListing(source, tools) {
+    const liveNames = new Set((tools || [])
+      .filter((tool) => tool && typeof tool.name === 'string')
+      .map((tool) => tool.name));
+
+    for (const [name, item] of registry) {
+      if (item.source === source && item.seenInLiveListing && !liveNames.has(name)) {
+        registry.delete(name);
+      }
+    }
   }
 
   let notifyTimer = null;
@@ -465,8 +496,16 @@
             ? value
             : (value && Array.isArray(value.tools) ? value.tools : null);
           if (list) {
+            // Unlike `tools` and `listTools`, native getTools() is the live
+            // WebMCP source of truth. Reconcile before adding the current
+            // entries so navigating away from a tool-bearing SPA route cannot
+            // leave its old tools cached indefinitely.
+            if (key === 'getTools') reconcileLiveListing(entry.label, list);
             discovered += list.length;
-            list.forEach((tool) => remember(tool, entry.label, { keepExisting: true }));
+            list.forEach((tool) => remember(tool, entry.label, {
+              keepExisting: true,
+              fromLiveListing: key === 'getTools',
+            }));
           }
         } catch (err) {
           errors.push(entry.label + '.' + key + ': ' + String((err && err.message) || err));
