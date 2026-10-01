@@ -216,6 +216,8 @@ const QUALITY = {
 
 /** One recording at a time: the offscreen document holds a single recorder. */
 let recording = null; // { tabId, label, showCursor }
+/** Tab whose cursor the side panel asked for while it records on its own. */
+let panelCursorTab = null;
 
 async function ensureOffscreen() {
   const existing = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
@@ -290,7 +292,8 @@ async function stopRecording() {
 
 // A navigation wipes the content script's state; put the cursor back.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'complete' && recording && recording.tabId === tabId && recording.showCursor) {
+  const wanted = (recording && recording.tabId === tabId && recording.showCursor) || panelCursorTab === tabId;
+  if (changeInfo.status === 'complete' && wanted) {
     setCursor(tabId, true);
   }
 });
@@ -510,6 +513,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         diag('ERROR', 'Could not start recording: ' + err.message, 'Rec/SW');
         sendResponse({ success: false, error: err.message });
       });
+    return true;
+  }
+
+  // The side panel records picker streams itself; the worker only owns the cursor.
+  if (message.type === 'PANEL_CURSOR') {
+    panelCursorTab = message.enabled ? message.tabId : null;
+    setCursor(message.tabId, Boolean(message.enabled)).then(() => sendResponse({ success: true }));
     return true;
   }
 
