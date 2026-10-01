@@ -283,6 +283,7 @@ function renderMarkdown(container, text) {
 
 // Shared with the page hook and the tests: see lib/webmcp-schema.js.
 const S = globalThis.__WebMCPLocalAgentSchema;
+const R = globalThis.__WebMCPRecorder;
 const tokens = S.tokens;
 const humanize = S.humanize;
 
@@ -2068,20 +2069,36 @@ function pickTabToRecord() {
   });
 }
 
+/**
+ * Picker streams are recorded HERE, not in the offscreen document: Chrome aborts a
+ * desktopCapture id ("AbortError: Error starting tab capture") when it is consumed by a
+ * different document than the one that opened the picker. tabCapture ids still go
+ * through the worker and the offscreen document.
+ */
+let panelRecorder = null;
+let panelRecording = null; // { tabId, label, showCursor }
+
+function recordingFileName(label) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const safe = String(label).replace(/[^\w-]+/g, '_').slice(0, 40);
+  return `webmcp-agent/${stamp}-${safe}.webm`;
+}
+
 async function startSessionRecording() {
   if (!state.recordSession) return false;
   const first = state.messages.find((m) => m.role === 'user' && !m.synthetic);
+  const label = first ? String(first.content).slice(0, 40) : 'session';
   const request = {
     type: 'RECORDING_START',
     tabId: state.tabId,
-    label: first ? String(first.content).slice(0, 40) : 'session',
+    label,
     quality: state.recordQuality,
     showCursor: state.showVirtualCursor,
   };
-  const send = (extra) => chrome.runtime.sendMessage({ ...request, ...extra })
+  const send = () => chrome.runtime.sendMessage(request)
     .catch((err) => ({ success: false, error: String((err && err.message) || err) }));
 
-  let reply = await send();
+  const reply = await send();
   if (reply && reply.needsPicker) {
     console.log('[Rec] tabCapture is not granted for this tab; opening the Chrome tab picker.');
     const streamId = await pickTabToRecord();
@@ -2090,7 +2107,22 @@ async function startSessionRecording() {
       showStatus('Recording cancelled: no tab was shared. The agent continues without a video.');
       return false;
     }
-    reply = await send({ streamId, source: 'desktop' });
+    const preset = R.QUALITY[state.recordQuality] || R.QUALITY.standard;
+    const recorder = R.createRecorder();
+    try {
+      console.log('[Rec] Recording in the side panel (source=desktop, id length=' + streamId.length + ').');
+      await recorder.start({ streamId, source: 'desktop', fps: preset.fps, bitrate: preset.bitrate });
+    } catch (err) {
+      console.warn('[Rec] ' + String((err && err.message) || err));
+      showStatus('Could not record the session: ' + String((err && err.message) || err));
+      return false;
+    }
+    panelRecorder = recorder;
+    panelRecording = { tabId: state.tabId, label, showCursor: state.showVirtualCursor };
+    if (state.showVirtualCursor) {
+      await chrome.runtime.sendMessage({ type: 'PANEL_CURSOR', tabId: state.tabId, enabled: true }).catch(() => {});
+    }
+    return true;
   }
   if (!reply || !reply.success) {
     showStatus('Could not record the session: ' + ((reply && reply.error) || 'unknown error'));
@@ -2099,7 +2131,26 @@ async function startSessionRecording() {
   return true;
 }
 
+async function stopPanelRecording() {
+  const recorder = panelRecorder;
+  const info = panelRecording;
+  panelRecorder = panelRecording = null;
+  if (info.showCursor) {
+    await chrome.runtime.sendMessage({ type: 'PANEL_CURSOR', tabId: info.tabId, enabled: false }).catch(() => {});
+  }
+  try {
+    const { url, size } = await recorder.stop();
+    await chrome.downloads.download({ url, filename: recordingFileName(info.label), saveAs: false });
+    console.log('[Rec] Recording saved (' + Math.round(size / 1024) + ' KB).');
+    // The download reads the blob asynchronously; revoke it afterwards.
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (err) {
+    showStatus('Could not save the recording: ' + String((err && err.message) || err));
+  }
+}
+
 async function stopSessionRecording() {
+  if (panelRecorder) return stopPanelRecording();
   const reply = await chrome.runtime.sendMessage({ type: 'RECORDING_STOP' })
     .catch((err) => ({ success: false, error: String((err && err.message) || err) }));
   if (!reply || !reply.success) showStatus('Could not save the recording: ' + ((reply && reply.error) || 'unknown error'));

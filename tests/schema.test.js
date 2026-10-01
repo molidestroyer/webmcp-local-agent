@@ -335,3 +335,13 @@ test('shouldNudge: only multi-step, after success, not on questions, bounded', (
   assert.equal(S.shouldNudge({ ...base, reply: { content: 'Which company name should I use?' } }), false);
   assert.equal(S.shouldNudge({ ...base, nudges: 10 }), false);
 });
+
+test('recorder quality presets match the copy in background.js', () => {
+  const fs = require('node:fs');
+  const R = require('../lib/recorder.js');
+  const bg = fs.readFileSync(require('node:path').join(__dirname, '..', 'background.js'), 'utf8');
+  for (const [name, preset] of Object.entries(R.QUALITY)) {
+    const pattern = new RegExp(`${name}:\\s*\\{\\s*fps:\\s*${preset.fps},\\s*bitrate:\\s*${String(preset.bitrate).replace(/(\d)(?=(\d{3})+$)/g, '$1_')}\\s*\\}`);
+    assert.match(bg, pattern, `background.js QUALITY.${name} differs from lib/recorder.js`);
+  }
+});

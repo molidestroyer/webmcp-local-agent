@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.5
+
+- `AbortError: Error starting tab capture (source=desktop, id length=24)`: un id de
+  `desktopCapture` solo se puede consumir en el documento que abrió el selector, y 0.7.3 lo
+  abría en el panel pero lo consumía en el documento offscreen. Ahora las grabaciones que
+  salen del selector se hacen en el propio panel y se descargan desde él; las de `tabCapture`
+  siguen yendo por el worker y el offscreen. La lógica de `MediaRecorder` se comparte en
+  `lib/recorder.js`. El worker solo gestiona el cursor del panel (`PANEL_CURSOR`).
+
 ## 0.7.4
 
 - El error de captura llegaba al panel como «Error starting tab capture», sin decir qué
