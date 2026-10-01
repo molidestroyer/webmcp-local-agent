@@ -11,17 +11,26 @@ let chunks = [];
 
 async function start({ streamId, source, fps, bitrate }) {
   if (recorder) throw new Error('A recording is already in progress.');
-  stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      mandatory: {
-        // 'tab' for tabCapture ids, 'desktop' for the ones from desktopCapture.
-        chromeMediaSource: source === 'desktop' ? 'desktop' : 'tab',
-        chromeMediaSourceId: streamId,
-        maxFrameRate: fps,
+  // 'tab' for tabCapture ids, 'desktop' for the ones from desktopCapture.
+  const mediaSource = source === 'desktop' ? 'desktop' : 'tab';
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        mandatory: {
+          chromeMediaSource: mediaSource,
+          chromeMediaSourceId: streamId,
+          maxFrameRate: fps,
+        },
       },
-    },
-  });
+    });
+  } catch (err) {
+    // The bare message ("Error starting tab capture") hides which constraint or id
+    // failed; keep the DOMException name and what we asked for.
+    const name = (err && err.name) || 'Error';
+    const message = (err && err.message) || String(err);
+    throw new Error(`${name}: ${message} (source=${mediaSource}, id length=${String(streamId || '').length}, fps=${fps})`);
+  }
   chunks = [];
   const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
     .find((type) => MediaRecorder.isTypeSupported(type));

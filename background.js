@@ -263,6 +263,7 @@ async function startRecording({ tabId, label, quality, showCursor, streamId: pic
   if (typeof tabId !== 'number') throw new Error('There is no active tab to record.');
   const preset = QUALITY[quality] || QUALITY.standard;
   const { streamId, source } = await captureStreamId(tabId, { streamId: pickedId, source: pickedSource });
+  diag('INFO', `Starting capture (source=${source}, id length=${String(streamId || '').length}).`, 'Rec/SW');
   await ensureOffscreen();
   const answer = await toOffscreen({ type: 'REC_START', streamId, source, ...preset });
   if (!answer || !answer.success) throw new Error((answer && answer.error) || 'The recorder did not start.');
