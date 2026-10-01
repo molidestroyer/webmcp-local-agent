@@ -2102,13 +2102,20 @@ function lastUserRequest() {
 async function settleTools() {
   await detectPageTools();
   let signature = S.toolSignature(state.tools);
+  const startCount = state.tools.length;
   for (let waited = 0; waited < SETTLE_MAX_MS; waited += SETTLE_STEP_MS) {
     await new Promise((resolve) => setTimeout(resolve, SETTLE_STEP_MS));
     await detectPageTools();
     const next = S.toolSignature(state.tools);
-    if (next === signature) return;
+    if (next === signature) {
+      console.log('[Agent] Tools settled after ' + (waited + SETTLE_STEP_MS) + ' ms: '
+        + startCount + ' -> ' + state.tools.length + ' tool(s).');
+      return;
+    }
     signature = next;
   }
+  console.warn('[Agent] Tools still changing after ' + SETTLE_MAX_MS + ' ms; continuing with '
+    + state.tools.length + ' tool(s).');
 }
 
 async function runAgentLoop() {
@@ -2147,8 +2154,12 @@ async function runAgentLoop() {
       // A multi-step request answered with plain text right after a success usually
       // means the model reported progress instead of continuing. Push it once per
       // step, bounded; anything else (a question, a failure) ends the turn.
-      if (!S.shouldNudge({ request, reply, lastRound, nudges, maxNudges: MAX_NUDGES })) return;
+      if (!S.shouldNudge({ request, reply, lastRound, nudges, maxNudges: MAX_NUDGES })) {
+        console.log('[Agent] Turn ended with text (round ' + (step + 1) + ', nudges used ' + nudges + '/' + MAX_NUDGES + ').');
+        return;
+      }
       nudges++;
+      console.log('[Agent] Nudge ' + nudges + '/' + MAX_NUDGES + ' after round ' + (step + 1) + ': multi-step request, last round succeeded, reply had no question and no tool call.');
       state.messages.push({ role: 'user', synthetic: true, content: NUDGE_TEXT });
       lastRound = [];
       continue;
