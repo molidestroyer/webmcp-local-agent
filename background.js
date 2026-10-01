@@ -235,14 +235,33 @@ function setCursor(tabId, enabled) {
   return bridge(tabId, 'cursor', { enabled }).catch(() => {});
 }
 
+/**
+ * tabCapture only works on a tab the extension was "invoked" on (activeTab),
+ * and Chrome drops that grant on every navigation or tab switch. When it is
+ * missing, ask for the tab through Chrome's own picker instead of making the
+ * user reload: one click on Share, any tab. Other tabCapture errors propagate.
+ */
+async function captureStreamId(tabId) {
+  try {
+    const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+    return { streamId, source: 'tab' };
+  } catch (err) {
+    if (!/not been invoked|activeTab/i.test(String((err && err.message) || err))) throw err;
+    diag('INFO', 'tabCapture not granted for this tab; asking for it through the Chrome picker.', 'Rec/SW');
+  }
+  // No targetTab: the id is then usable by this extension's own offscreen document.
+  const streamId = await new Promise((resolve) => chrome.desktopCapture.chooseDesktopMedia(['tab'], resolve));
+  if (!streamId) throw new Error('Recording cancelled: no tab was shared.');
+  return { streamId, source: 'desktop' };
+}
+
 async function startRecording({ tabId, label, quality, showCursor }) {
   if (recording) await stopRecording().catch(() => {});
   if (typeof tabId !== 'number') throw new Error('There is no active tab to record.');
   const preset = QUALITY[quality] || QUALITY.standard;
-  // Needs the activeTab grant: it exists for the tab the user opened the panel on.
-  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+  const { streamId, source } = await captureStreamId(tabId);
   await ensureOffscreen();
-  const answer = await toOffscreen({ type: 'REC_START', streamId, ...preset });
+  const answer = await toOffscreen({ type: 'REC_START', streamId, source, ...preset });
   if (!answer || !answer.success) throw new Error((answer && answer.error) || 'The recorder did not start.');
   recording = { tabId, label: label || 'session', showCursor: Boolean(showCursor) };
   if (recording.showCursor) await setCursor(tabId, true);

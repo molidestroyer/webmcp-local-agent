@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1
+
+- La grabación fallaba con «Extension has not been invoked for the current page»:
+  `tabCapture` exige `activeTab` sobre esa pestaña y Chrome lo retira al navegar o cambiar
+  de pestaña. Ahora, si falta, se cae a `desktopCapture.chooseDesktopMedia(['tab'])` (un
+  clic en Compartir, sin recargar). Cualquier otro error de `tabCapture` se sigue mostrando
+  tal cual. Permiso nuevo: `desktopCapture`.
+
 ## 0.7.0
 
 - El límite de rondas de tools (antes fijo en 6, `MAX_TOOL_STEPS`) es ahora un setting
