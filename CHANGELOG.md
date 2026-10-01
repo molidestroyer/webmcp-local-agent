@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.3
+
+- El selector de pestañas de 0.7.1 nunca llegó a mostrarse: `chooseDesktopMedia` se llamaba
+  desde el service worker, que no tiene ventana a la que anclar el diálogo, y devolvía un id
+  vacío al instante («Recording cancelled»). Ahora el worker intenta `tabCapture` y, si falta
+  `activeTab`, responde `needsPicker`; el panel lateral —una ventana real que conserva el
+  gesto del clic en Send— abre el selector y devuelve el `streamId` al worker. Cancelar el
+  selector no bloquea al agente: sigue sin vídeo y lo avisa.
+
 ## 0.7.2
 
 - El agente se paraba tras el primer paso de un flujo de varios pasos y había que escribir

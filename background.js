@@ -236,30 +236,33 @@ function setCursor(tabId, enabled) {
 }
 
 /**
- * tabCapture only works on a tab the extension was "invoked" on (activeTab),
- * and Chrome drops that grant on every navigation or tab switch. When it is
- * missing, ask for the tab through Chrome's own picker instead of making the
- * user reload: one click on Share, any tab. Other tabCapture errors propagate.
+ * tabCapture only works on a tab the extension was "invoked" on (activeTab), and
+ * Chrome drops that grant on every navigation or tab switch. When it is missing
+ * this throws with `needsPicker`, and the side panel — a real window that still
+ * holds the user gesture from pressing Send — opens Chrome's picker and calls back
+ * with the stream id. The picker cannot be opened from here: a service worker has
+ * no window to anchor it to and it came back empty instantly. Other tabCapture
+ * errors propagate untouched.
  */
-async function captureStreamId(tabId) {
+async function captureStreamId(tabId, picked) {
+  if (picked && picked.streamId) return { streamId: picked.streamId, source: picked.source || 'desktop' };
   try {
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
     return { streamId, source: 'tab' };
   } catch (err) {
     if (!/not been invoked|activeTab/i.test(String((err && err.message) || err))) throw err;
-    diag('INFO', 'tabCapture not granted for this tab; asking for it through the Chrome picker.', 'Rec/SW');
+    diag('INFO', 'tabCapture not granted for this tab; asking the side panel to open the picker.', 'Rec/SW');
+    const needs = new Error('tabCapture is not granted for this tab.');
+    needs.needsPicker = true;
+    throw needs;
   }
-  // No targetTab: the id is then usable by this extension's own offscreen document.
-  const streamId = await new Promise((resolve) => chrome.desktopCapture.chooseDesktopMedia(['tab'], resolve));
-  if (!streamId) throw new Error('Recording cancelled: no tab was shared.');
-  return { streamId, source: 'desktop' };
 }
 
-async function startRecording({ tabId, label, quality, showCursor }) {
+async function startRecording({ tabId, label, quality, showCursor, streamId: pickedId, source: pickedSource }) {
   if (recording) await stopRecording().catch(() => {});
   if (typeof tabId !== 'number') throw new Error('There is no active tab to record.');
   const preset = QUALITY[quality] || QUALITY.standard;
-  const { streamId, source } = await captureStreamId(tabId);
+  const { streamId, source } = await captureStreamId(tabId, { streamId: pickedId, source: pickedSource });
   await ensureOffscreen();
   const answer = await toOffscreen({ type: 'REC_START', streamId, source, ...preset });
   if (!answer || !answer.success) throw new Error((answer && answer.error) || 'The recorder did not start.');
@@ -502,6 +505,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .then(() => sendResponse({ success: true }))
       .catch((err) => {
         recording = null;
+        if (err && err.needsPicker) return sendResponse({ success: false, needsPicker: true, error: err.message });
         diag('ERROR', 'Could not start recording: ' + err.message, 'Rec/SW');
         sendResponse({ success: false, error: err.message });
       });

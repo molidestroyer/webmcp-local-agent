@@ -2056,16 +2056,42 @@ async function runAgent() {
   }
 }
 
+/** Opens Chrome's tab picker. Has to run here: the panel is a window and holds the gesture. */
+function pickTabToRecord() {
+  return new Promise((resolve) => {
+    try {
+      chrome.desktopCapture.chooseDesktopMedia(['tab'], (streamId) => resolve(streamId || ''));
+    } catch (err) {
+      console.warn('[Rec] The tab picker could not be opened: ' + String((err && err.message) || err));
+      resolve('');
+    }
+  });
+}
+
 async function startSessionRecording() {
   if (!state.recordSession) return false;
   const first = state.messages.find((m) => m.role === 'user' && !m.synthetic);
-  const reply = await chrome.runtime.sendMessage({
+  const request = {
     type: 'RECORDING_START',
     tabId: state.tabId,
     label: first ? String(first.content).slice(0, 40) : 'session',
     quality: state.recordQuality,
     showCursor: state.showVirtualCursor,
-  }).catch((err) => ({ success: false, error: String((err && err.message) || err) }));
+  };
+  const send = (extra) => chrome.runtime.sendMessage({ ...request, ...extra })
+    .catch((err) => ({ success: false, error: String((err && err.message) || err) }));
+
+  let reply = await send();
+  if (reply && reply.needsPicker) {
+    console.log('[Rec] tabCapture is not granted for this tab; opening the Chrome tab picker.');
+    const streamId = await pickTabToRecord();
+    if (!streamId) {
+      console.log('[Rec] No tab was shared; the agent continues without recording.');
+      showStatus('Recording cancelled: no tab was shared. The agent continues without a video.');
+      return false;
+    }
+    reply = await send({ streamId, source: 'desktop' });
+  }
   if (!reply || !reply.success) {
     showStatus('Could not record the session: ' + ((reply && reply.error) || 'unknown error'));
     return false;
