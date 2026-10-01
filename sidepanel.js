@@ -10,7 +10,7 @@
 'use strict';
 
 const OLLAMA_HOSTS = ['http://127.0.0.1:11434', 'http://localhost:11434'];
-const MAX_TOOL_STEPS = 6;
+const DEFAULT_MAX_TOOL_STEPS = 100;
 const HISTORY_LIMIT = 100;
 // Local models (Ollama) can take much longer than Copilot to answer a suggestion
 // request, especially on first load when the model has to be paged into VRAM.
@@ -109,6 +109,8 @@ const els = {
   // settings
   autoSuggestToggle: document.getElementById('auto-suggest-toggle'),
   resetChatOnTabToggle: document.getElementById('reset-chat-on-tab-toggle'),
+  limitRoundsToggle: document.getElementById('limit-rounds-toggle'),
+  maxRoundsInput: document.getElementById('max-rounds-input'),
   recordSessionToggle: document.getElementById('record-session-toggle'),
   showCursorToggle: document.getElementById('show-cursor-toggle'),
   recordQuality: document.getElementById('record-quality'),
@@ -187,6 +189,8 @@ const state = {
   busy: false,
   ollamaOk: false,
   autoSuggest: false,
+  limitRounds: true,
+  maxToolSteps: DEFAULT_MAX_TOOL_STEPS,
   recordSession: false,
   showVirtualCursor: false,
   recordQuality: 'standard',
@@ -2071,7 +2075,8 @@ async function runAgentLoop() {
   const isCopilot = state.model.startsWith('copilot:');
   syncSystemMessage();
 
-  for (let step = 0; step < MAX_TOOL_STEPS; step++) {
+  const maxSteps = state.limitRounds ? state.maxToolSteps : Infinity;
+  for (let step = 0; step < maxSteps; step++) {
     await detectPageTools();
     const tools = state.tools.map(toOllamaTool);
     tools.unshift(NATIVE_WAIT_TOOL);
@@ -2099,7 +2104,7 @@ async function runAgentLoop() {
     }
   }
 
-  addMessage('note', 'Reached the limit of ' + MAX_TOOL_STEPS + ' tool rounds.');
+  addMessage('note', 'Reached the limit of ' + maxSteps + ' tool rounds. You can change it in Settings → Agent Limits.');
 }
 
 async function sendMessage() {
@@ -2591,6 +2596,28 @@ if (els.chatThreadTitle) {
   });
 }
 
+function normalizeMaxSteps(value) {
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, 1000) : DEFAULT_MAX_TOOL_STEPS;
+}
+function syncLimitControls() {
+  if (els.maxRoundsInput) els.maxRoundsInput.disabled = !state.limitRounds;
+}
+if (els.limitRoundsToggle) {
+  els.limitRoundsToggle.addEventListener('change', () => {
+    state.limitRounds = els.limitRoundsToggle.checked;
+    chrome.storage.local.set({ limitRounds: state.limitRounds });
+    syncLimitControls();
+  });
+}
+if (els.maxRoundsInput) {
+  els.maxRoundsInput.addEventListener('change', () => {
+    state.maxToolSteps = normalizeMaxSteps(els.maxRoundsInput.value);
+    els.maxRoundsInput.value = state.maxToolSteps;
+    chrome.storage.local.set({ maxToolSteps: state.maxToolSteps });
+  });
+}
+
 function bindRecordingSetting(el, key, read) {
   if (!el) return;
   el.addEventListener('change', () => {
@@ -2839,6 +2866,8 @@ if (els.copilotCopyCodeBtn) {
     'confirmTools',
     'activeTab',
     'autoSuggest',
+    'limitRounds',
+    'maxToolSteps',
     'recordSession',
     'showVirtualCursor',
     'recordQuality',
@@ -2854,6 +2883,11 @@ if (els.copilotCopyCodeBtn) {
   state.chatSessions = Array.isArray(stored.chatSessions) ? stored.chatSessions : [];
   els.confirmTools.checked = Boolean(stored.confirmTools);
   state.autoSuggest = Boolean(stored.autoSuggest);
+  state.limitRounds = stored.limitRounds !== false;
+  state.maxToolSteps = normalizeMaxSteps(stored.maxToolSteps);
+  if (els.limitRoundsToggle) els.limitRoundsToggle.checked = state.limitRounds;
+  if (els.maxRoundsInput) els.maxRoundsInput.value = state.maxToolSteps;
+  syncLimitControls();
   state.recordSession = Boolean(stored.recordSession);
   state.showVirtualCursor = Boolean(stored.showVirtualCursor);
   state.recordQuality = stored.recordQuality || 'standard';
