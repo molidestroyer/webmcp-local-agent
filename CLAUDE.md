@@ -373,6 +373,12 @@ lines. Two things it is easy to get wrong:
   collapsed to 2px, and tool cards lost their footer. **Any scrolling flex column added
   here needs the same rule.**
 
+- **Recording capture** (0.7.x). `tabCapture.getMediaStreamId()` runs in the worker and
+  needs `activeTab` on that exact tab, which Chrome drops on navigation or tab switch. The
+  fallback, `desktopCapture.chooseDesktopMedia(['tab'])`, **must run in the side panel**:
+  from the service worker it has no window to anchor to and returns an empty id at once.
+  The worker answers `needsPicker`; the panel picks and hands back `streamId` + `source`.
+
 ## Running it
 
 ```bash
