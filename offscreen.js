@@ -9,13 +9,14 @@ let recorder = null;
 let stream = null;
 let chunks = [];
 
-async function start({ streamId, fps, bitrate }) {
+async function start({ streamId, source, fps, bitrate }) {
   if (recorder) throw new Error('A recording is already in progress.');
   stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
     video: {
       mandatory: {
-        chromeMediaSource: 'tab',
+        // 'tab' for tabCapture ids, 'desktop' for the ones from desktopCapture.
+        chromeMediaSource: source === 'desktop' ? 'desktop' : 'tab',
         chromeMediaSourceId: streamId,
         maxFrameRate: fps,
       },
