@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.2
+
+- El agente se paraba tras el primer paso de un flujo de varios pasos y había que escribir
+  «do it» en cada uno. Tres causas, tres arreglos:
+  - `SYSTEM_PROMPT`: la regla «SUCCESS → parar» no distinguía el éxito de un paso del de la
+    meta. Ahora un éxito intermedio obliga a llamar a la siguiente tool en el mismo turno, y
+    hay una sección «WHEN TO STOP» (todo hecho, FAILED, o falta algo que solo el usuario da).
+  - `runAgentLoop`: si el mensaje del usuario es multi-paso (`isMultiStepRequest`), la
+    ronda anterior tuvo éxito y la respuesta es texto sin pregunta, se empuja al modelo una
+    vez más (`synthetic`, máx. 10 por turno, fuera de historial y títulos). No se activa en
+    peticiones de una sola acción.
+  - `settleTools()`: tras ejecutar tools se relee la lista hasta que no cambia (máx. 1,5 s),
+    para que las tools de un formulario recién abierto estén antes de la siguiente ronda.
+
 ## 0.7.1
 
 - La grabación fallaba con «Extension has not been invoked for the current page»:

@@ -45,15 +45,23 @@ const SYSTEM_PROMPT = [
   '  the question allows it, and never pretend to have acted on the page.',
   '',
   'AFTER A TOOL RUNS',
+  '- A tool succeeding is not the end of the job. If the user gave several steps (a list, or',
+  '  "then ..."), a SUCCESS or COMPLETED from one tool only finishes that step: check what is',
+  '  left and call the next tool in this same turn. Do not write a progress note ("step 1',
+  '  done, now step 2") unless the tool call for step 2 is in that same turn.',
   '- In-progress status (PENDING, RUNNING, QUEUED) or a navigation: call "wait" with',
   '  seconds=5, then check the status again. If it is still in progress, wait 10, then 20.',
   '  After the third wait, stop and report what the last status was.',
-  '- The page\'s tools change as the page does: re-read the list at each step.',
-  '- SUCCESS or COMPLETED: stop calling tools and tell the user what happened, briefly, in',
-  '  their language.',
-  '- FAILED: stop calling tools, state the failure reason the tool gave, and ask the user',
-  '  whether to retry or try something else. Do not stop silently and do not retry the same',
-  '  call with the same arguments.',
+  '- The page\'s tools change as the page does: re-read the list at each step. A step may',
+  '  open a form or view whose tools only appear afterwards.',
+  '',
+  'WHEN TO STOP (reply with text and no tool call)',
+  '- Everything the user asked for is done: tell them what happened, briefly, in their',
+  '  language.',
+  '- FAILED: state the failure reason the tool gave and ask the user whether to retry or try',
+  '  something else. Do not stop silently and do not retry the same call with the same',
+  '  arguments.',
+  '- You need something only the user can give (a missing required value, a credential).',
 ].join('\n');
 
 const NATIVE_WAIT_TOOL = {
@@ -515,7 +523,7 @@ let suggestAbortController = null;
 
 /** Last few real exchanges, so a post-turn suggestion can follow up on them. */
 function recentConversationSummary() {
-  const turns = state.messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content);
+  const turns = state.messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content && !m.synthetic);
   if (!turns.length) return '';
   return turns
     .slice(-6)
@@ -2050,7 +2058,7 @@ async function runAgent() {
 
 async function startSessionRecording() {
   if (!state.recordSession) return false;
-  const first = state.messages.find((m) => m.role === 'user');
+  const first = state.messages.find((m) => m.role === 'user' && !m.synthetic);
   const reply = await chrome.runtime.sendMessage({
     type: 'RECORDING_START',
     tabId: state.tabId,
@@ -2071,13 +2079,57 @@ async function stopSessionRecording() {
   if (!reply || !reply.success) showStatus('Could not save the recording: ' + ((reply && reply.error) || 'unknown error'));
 }
 
+const MAX_NUDGES = 10;
+const NUDGE_TEXT = 'Continue with the next step of my instructions now by calling its tool. '
+  + 'If every step is already done, just say so briefly.';
+const SETTLE_STEP_MS = 250;
+const SETTLE_MAX_MS = 1500;
+
+function lastUserRequest() {
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const m = state.messages[i];
+    if (m.role === 'user' && !m.synthetic) return String(m.content || '');
+  }
+  return '';
+}
+
+/**
+ * Re-reads the page's tools until the list stops changing (two identical reads in a
+ * row), for at most SETTLE_MAX_MS. A step that opens a form or navigates registers the
+ * next step's tools a moment later, and handing the model the list before that makes it
+ * conclude the page has nothing left to offer.
+ */
+async function settleTools() {
+  await detectPageTools();
+  let signature = S.toolSignature(state.tools);
+  const startCount = state.tools.length;
+  for (let waited = 0; waited < SETTLE_MAX_MS; waited += SETTLE_STEP_MS) {
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_STEP_MS));
+    await detectPageTools();
+    const next = S.toolSignature(state.tools);
+    if (next === signature) {
+      console.log('[Agent] Tools settled after ' + (waited + SETTLE_STEP_MS) + ' ms: '
+        + startCount + ' -> ' + state.tools.length + ' tool(s).');
+      return;
+    }
+    signature = next;
+  }
+  console.warn('[Agent] Tools still changing after ' + SETTLE_MAX_MS + ' ms; continuing with '
+    + state.tools.length + ' tool(s).');
+}
+
 async function runAgentLoop() {
   const isCopilot = state.model.startsWith('copilot:');
   syncSystemMessage();
 
   const maxSteps = state.limitRounds ? state.maxToolSteps : Infinity;
+  const request = lastUserRequest();
+  let lastRound = [];
+  let nudges = 0;
   for (let step = 0; step < maxSteps; step++) {
-    await detectPageTools();
+    // After a tool ran, the page may still be mounting the next view.
+    if (lastRound.length) await settleTools();
+    else await detectPageTools();
     const tools = state.tools.map(toOllamaTool);
     tools.unshift(NATIVE_WAIT_TOOL);
 
@@ -2098,9 +2150,25 @@ async function runAgentLoop() {
     bubble.finish(reply);
     state.messages.push(reply);
 
-    if (!reply.tool_calls || !reply.tool_calls.length) return;
+    if (!reply.tool_calls || !reply.tool_calls.length) {
+      // A multi-step request answered with plain text right after a success usually
+      // means the model reported progress instead of continuing. Push it once per
+      // step, bounded; anything else (a question, a failure) ends the turn.
+      if (!S.shouldNudge({ request, reply, lastRound, nudges, maxNudges: MAX_NUDGES })) {
+        console.log('[Agent] Turn ended with text (round ' + (step + 1) + ', nudges used ' + nudges + '/' + MAX_NUDGES + ').');
+        return;
+      }
+      nudges++;
+      console.log('[Agent] Nudge ' + nudges + '/' + MAX_NUDGES + ' after round ' + (step + 1) + ': multi-step request, last round succeeded, reply had no question and no tool call.');
+      state.messages.push({ role: 'user', synthetic: true, content: NUDGE_TEXT });
+      lastRound = [];
+      continue;
+    }
+    lastRound = [];
     for (const call of reply.tool_calls) {
-      state.messages.push(await runToolCall(call));
+      const result = await runToolCall(call);
+      lastRound.push(result);
+      state.messages.push(result);
     }
   }
 
@@ -2347,7 +2415,7 @@ function applySessionTitle(session, title) {
 /** Asks the model for a short name for a thread. */
 async function generateSessionTitle(session, button) {
   const turns = (session.messages || [])
-    .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content)
+    .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content && !m.synthetic)
     .slice(0, 8)
     .map((m) => `${m.role}: ${String(m.content).slice(0, 300)}`)
     .join('\n');
@@ -2412,7 +2480,7 @@ function startNewSession() {
 }
 
 function saveCurrentChatSession() {
-  const userMsgs = (state.messages || []).filter((m) => m.role === 'user');
+  const userMsgs = (state.messages || []).filter((m) => m.role === 'user' && !m.synthetic);
   if (userMsgs.length === 0) return;
 
   const firstMsg = userMsgs[0].content;
