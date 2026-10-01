@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0
+
+- Grabación de vídeo de la sesión del agente (Settings → Session Recording, **desactivada
+  por defecto**). `tabCapture.getMediaStreamId()` en el worker → `MediaRecorder` en un
+  documento offscreen (`offscreen.js`) → `.webm` a `Downloads/webmcp-agent/` vía
+  `chrome.downloads`. Empieza al enviar un mensaje y para en un `finally` al acabar el turno.
+- Cursor virtual opcional (`virtual-cursor.js`, mundo ISOLATED, Shadow DOM): como las tools
+  son opacas, no intercepta un dispatcher sino que reacciona a los `click`/`input`/`change`/
+  `submit` que provoca la tool (ripple en clics, contorno en campos).
+- Permisos nuevos: `tabCapture`, `offscreen`, `downloads`.
+
 ## 0.6.27
 
 - Las sugerencias de prompt (`generatePromptSuggestions`) desaparecían en silencio al

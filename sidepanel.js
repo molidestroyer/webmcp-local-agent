@@ -109,6 +109,9 @@ const els = {
   // settings
   autoSuggestToggle: document.getElementById('auto-suggest-toggle'),
   resetChatOnTabToggle: document.getElementById('reset-chat-on-tab-toggle'),
+  recordSessionToggle: document.getElementById('record-session-toggle'),
+  showCursorToggle: document.getElementById('show-cursor-toggle'),
+  recordQuality: document.getElementById('record-quality'),
   catalogSourceNone: document.getElementById('catalog-source-none'),
   catalogSourceDemo: document.getElementById('catalog-source-demo'),
   catalogSourceRemote: document.getElementById('catalog-source-remote'),
@@ -184,6 +187,9 @@ const state = {
   busy: false,
   ollamaOk: false,
   autoSuggest: false,
+  recordSession: false,
+  showVirtualCursor: false,
+  recordQuality: 'standard',
   resetChatOnTabSwitch: false,
   suggesting: false,
   staticSuggestions: [],
@@ -1972,6 +1978,8 @@ async function runToolCall(call) {
     return toolMessage(text);
   }
 
+  // Short beat so the video shows the tool card before the page reacts.
+  if (state.recordSession && state.showVirtualCursor) await new Promise((r) => setTimeout(r, 150));
   const started = performance.now();
   const answer = await executeOnPage(name, args);
   const ms = performance.now() - started;
@@ -2022,7 +2030,44 @@ async function copilotChat(messages, tools, onChunk) {
   return result.message;
 }
 
+/**
+ * Recording wraps the whole agent turn, so it is one place that starts it and
+ * one `finally` that stops it: runAgent has several early returns.
+ * A failure to record is reported but never blocks the agent.
+ */
 async function runAgent() {
+  const recording = await startSessionRecording();
+  try {
+    await runAgentLoop();
+  } finally {
+    if (recording) await stopSessionRecording();
+  }
+}
+
+async function startSessionRecording() {
+  if (!state.recordSession) return false;
+  const first = state.messages.find((m) => m.role === 'user');
+  const reply = await chrome.runtime.sendMessage({
+    type: 'RECORDING_START',
+    tabId: state.tabId,
+    label: first ? String(first.content).slice(0, 40) : 'session',
+    quality: state.recordQuality,
+    showCursor: state.showVirtualCursor,
+  }).catch((err) => ({ success: false, error: String((err && err.message) || err) }));
+  if (!reply || !reply.success) {
+    showStatus('Could not record the session: ' + ((reply && reply.error) || 'unknown error'));
+    return false;
+  }
+  return true;
+}
+
+async function stopSessionRecording() {
+  const reply = await chrome.runtime.sendMessage({ type: 'RECORDING_STOP' })
+    .catch((err) => ({ success: false, error: String((err && err.message) || err) }));
+  if (!reply || !reply.success) showStatus('Could not save the recording: ' + ((reply && reply.error) || 'unknown error'));
+}
+
+async function runAgentLoop() {
   const isCopilot = state.model.startsWith('copilot:');
   syncSystemMessage();
 
@@ -2546,6 +2591,23 @@ if (els.chatThreadTitle) {
   });
 }
 
+function bindRecordingSetting(el, key, read) {
+  if (!el) return;
+  el.addEventListener('change', () => {
+    state[key] = read(el);
+    chrome.storage.local.set({ [key]: state[key] });
+    syncRecordingControls();
+  });
+}
+function syncRecordingControls() {
+  const off = !state.recordSession;
+  if (els.showCursorToggle) els.showCursorToggle.disabled = off;
+  if (els.recordQuality) els.recordQuality.disabled = off;
+}
+bindRecordingSetting(els.recordSessionToggle, 'recordSession', (el) => el.checked);
+bindRecordingSetting(els.showCursorToggle, 'showVirtualCursor', (el) => el.checked);
+bindRecordingSetting(els.recordQuality, 'recordQuality', (el) => el.value);
+
 els.confirmTools.addEventListener('change', () => {
   chrome.storage.local.set({ confirmTools: els.confirmTools.checked });
 });
@@ -2777,6 +2839,9 @@ if (els.copilotCopyCodeBtn) {
     'confirmTools',
     'activeTab',
     'autoSuggest',
+    'recordSession',
+    'showVirtualCursor',
+    'recordQuality',
     'resetChatOnTabSwitch',
     'catalogSourceMode',
     'catalogUrl',
@@ -2789,6 +2854,13 @@ if (els.copilotCopyCodeBtn) {
   state.chatSessions = Array.isArray(stored.chatSessions) ? stored.chatSessions : [];
   els.confirmTools.checked = Boolean(stored.confirmTools);
   state.autoSuggest = Boolean(stored.autoSuggest);
+  state.recordSession = Boolean(stored.recordSession);
+  state.showVirtualCursor = Boolean(stored.showVirtualCursor);
+  state.recordQuality = stored.recordQuality || 'standard';
+  if (els.recordSessionToggle) els.recordSessionToggle.checked = state.recordSession;
+  if (els.showCursorToggle) els.showCursorToggle.checked = state.showVirtualCursor;
+  if (els.recordQuality) els.recordQuality.value = state.recordQuality;
+  syncRecordingControls();
   if (els.autoSuggestToggle) els.autoSuggestToggle.checked = state.autoSuggest;
   state.resetChatOnTabSwitch = Boolean(stored.resetChatOnTabSwitch);
   if (els.resetChatOnTabToggle) els.resetChatOnTabToggle.checked = state.resetChatOnTabSwitch;
