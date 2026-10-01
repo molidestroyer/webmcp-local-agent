@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.4
+
+- El error de captura llegaba al panel como «Error starting tab capture», sin decir qué
+  restricción o qué id había fallado. `offscreen.js` ahora conserva el `name` y el
+  `message` de la `DOMException` y añade con qué se pidió (`source`, longitud del id, fps),
+  y el worker lo vuelca a Logs con `[Rec/SW]`.
+
 ## 0.7.3
 
 - El selector de pestañas de 0.7.1 nunca llegó a mostrarse: `chooseDesktopMedia` se llamaba
