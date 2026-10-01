@@ -119,7 +119,7 @@ async function ensureInjected(tabId) {
     });
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['content.js'],
+      files: ['virtual-cursor.js', 'content.js'],
       world: 'ISOLATED',
     });
   } catch (_) {
@@ -205,6 +205,73 @@ async function bridge(tabId, action, payload) {
   });
 }
 
+
+// --- Session recording -----------------------------------------------------
+
+const QUALITY = {
+  standard: { fps: 30, bitrate: 2_500_000 },
+  high: { fps: 30, bitrate: 6_000_000 },
+  smooth: { fps: 60, bitrate: 8_000_000 },
+};
+
+/** One recording at a time: the offscreen document holds a single recorder. */
+let recording = null; // { tabId, label, showCursor }
+
+async function ensureOffscreen() {
+  const existing = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+  if (existing.length) return;
+  await chrome.offscreen.createDocument({
+    url: 'offscreen.html',
+    reasons: ['USER_MEDIA'],
+    justification: 'Record the active tab while the agent runs, when the user enabled it in Settings.',
+  });
+}
+
+function toOffscreen(message) {
+  return chrome.runtime.sendMessage({ target: 'offscreen', ...message });
+}
+
+function setCursor(tabId, enabled) {
+  return bridge(tabId, 'cursor', { enabled }).catch(() => {});
+}
+
+async function startRecording({ tabId, label, quality, showCursor }) {
+  if (recording) await stopRecording().catch(() => {});
+  if (typeof tabId !== 'number') throw new Error('There is no active tab to record.');
+  const preset = QUALITY[quality] || QUALITY.standard;
+  // Needs the activeTab grant: it exists for the tab the user opened the panel on.
+  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+  await ensureOffscreen();
+  const answer = await toOffscreen({ type: 'REC_START', streamId, ...preset });
+  if (!answer || !answer.success) throw new Error((answer && answer.error) || 'The recorder did not start.');
+  recording = { tabId, label: label || 'session', showCursor: Boolean(showCursor) };
+  if (recording.showCursor) await setCursor(tabId, true);
+  diag('INFO', `Recording started on tab ${tabId} (${preset.fps} fps).`, 'Rec/SW');
+}
+
+async function stopRecording() {
+  if (!recording) return { skipped: true };
+  const { tabId, label, showCursor } = recording;
+  recording = null;
+  if (showCursor) await setCursor(tabId, false);
+  const answer = await toOffscreen({ type: 'REC_STOP' });
+  if (!answer || !answer.success) throw new Error((answer && answer.error) || 'The recorder did not stop cleanly.');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const safe = String(label).replace(/[^\w-]+/g, '_').slice(0, 40);
+  await chrome.downloads.download({ url: answer.url, filename: `webmcp-agent/${stamp}-${safe}.webm`, saveAs: false });
+  // Give the download time to read the blob before it is revoked.
+  setTimeout(() => chrome.offscreen.closeDocument().catch(() => {}), 60000);
+  diag('INFO', `Recording saved (${Math.round(answer.size / 1024)} KB).`, 'Rec/SW');
+  return { size: answer.size };
+}
+
+// A navigation wipes the content script's state; put the cursor back.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'complete' && recording && recording.tabId === tabId && recording.showCursor) {
+    setCursor(tabId, true);
+  }
+});
+
 const COPILOT_CLIENT_ID = 'Iv1.b507a08c87ecfe98';
 
 // Device-flow errors that mean "keep polling"; everything else is terminal.
@@ -219,8 +286,8 @@ const COPILOT_PENDING_ERRORS = new Set(['authorization_pending', 'slow_down']);
  * lands in the worker's own devtools window and not in the panel. Without this
  * the Logs tab can only ever show half of an auth failure.
  */
-function diag(level, message) {
-  const line = '[Copilot/SW] ' + message;
+function diag(level, message, tag = 'Copilot/SW') {
+  const line = `[${tag}] ` + message;
   if (level === 'ERROR') console.error(line);
   else if (level === 'WARN') console.warn(line);
   else console.log(line);
@@ -409,6 +476,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse(answer);
     });
     return true; // async response
+  }
+
+  if (message.type === 'RECORDING_START') {
+    startRecording(message)
+      .then(() => sendResponse({ success: true }))
+      .catch((err) => {
+        recording = null;
+        diag('ERROR', 'Could not start recording: ' + err.message, 'Rec/SW');
+        sendResponse({ success: false, error: err.message });
+      });
+    return true;
+  }
+
+  if (message.type === 'RECORDING_STOP') {
+    stopRecording()
+      .then((data) => sendResponse({ success: true, ...data }))
+      .catch((err) => {
+        diag('ERROR', 'Could not save the recording: ' + err.message, 'Rec/SW');
+        sendResponse({ success: false, error: err.message });
+      });
+    return true;
   }
 
   if (message.type === 'START_COPILOT_AUTH') {

@@ -32,6 +32,15 @@
 
     port.onMessage.addListener(async (message) => {
       if (!message || message.type !== 'request') return;
+      // The cursor lives in this world; the page never needs to hear about it.
+      if (message.action === 'cursor') {
+        const api = globalThis.__webmcpVirtualCursor__;
+        if (api) api.setEnabled(Boolean(message.payload && message.payload.enabled));
+        try {
+          port.postMessage({ type: 'response', id: message.id, result: { ok: Boolean(api) }, error: null });
+        } catch (_) { /* the panel was closed */ }
+        return;
+      }
       const answer = await askPage(message.action, message.payload);
       try {
         port.postMessage({

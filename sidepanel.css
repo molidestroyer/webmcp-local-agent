@@ -1283,3 +1283,14 @@ body {
 }
 
 
+
+.setting-item select {
+  flex: 0 0 auto;
+  background: var(--bg-elev, #1b1b1f);
+  color: inherit;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.setting-item select:disabled,
+.setting-item input:disabled + .setting-item__text { opacity: 0.5; }

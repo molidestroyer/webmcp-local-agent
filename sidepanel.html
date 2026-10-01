@@ -190,6 +190,39 @@
         </label>
       </div>
 
+      <!-- Group: Session recording -->
+      <div class="setting-card">
+        <div class="field-label">Session Recording</div>
+        <label class="setting-item" title="Record the active tab as a .webm while the agent works">
+          <input type="checkbox" id="record-session-toggle">
+          <div class="setting-item__text">
+            <span class="setting-item__title">Record a video while the agent works</span>
+            <span class="setting-item__desc">
+              Off by default. Captures the active tab from the moment you send a message until the agent finishes, then saves a .webm to your Downloads folder (webmcp-agent/). Nothing leaves your machine.
+            </span>
+          </div>
+        </label>
+        <label class="setting-item" title="Draw a virtual cursor and click effects over the page">
+          <input type="checkbox" id="show-cursor-toggle">
+          <div class="setting-item__text">
+            <span class="setting-item__title">Show cursor and click animations</span>
+            <span class="setting-item__desc">
+              Moves a visible cursor to whatever a tool clicks or fills, with a ripple on clicks and an outline on fields, so the video shows what happened.
+            </span>
+          </div>
+        </label>
+        <label class="setting-item">
+          <div class="setting-item__text">
+            <span class="setting-item__title">Quality</span>
+          </div>
+          <select id="record-quality">
+            <option value="standard">Standard (30 fps)</option>
+            <option value="high">High (30 fps, higher bitrate)</option>
+            <option value="smooth">Smooth (60 fps)</option>
+          </select>
+        </label>
+      </div>
+
       <!-- Group 3: Knowledge & Business Rules Catalog -->
       <div class="setting-card">
         <div class="field-label">Knowledge & Prompt Catalog</div>
