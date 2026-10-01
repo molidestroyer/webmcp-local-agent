@@ -255,6 +255,17 @@ Se une con `
 `. Con `.join(' ')` la lista se deshace en un párrafo y se pierde la
 estructura que hace que un modelo pequeño la siga.
 
+### Cuándo para el agente (0.7.2)
+
+La salida normal del bucle es una respuesta **sin `tool_calls`**. Por eso «SUCCESS → parar»
+en el prompt cortaba los flujos de varios pasos: un modelo obediente narraba el paso 1 y
+terminaba. El prompt separa éxito del paso de éxito de la meta, y `runAgentLoop` empuja una
+vez (`shouldNudge`, máx. `MAX_NUDGES`) solo si la petición es multi-paso, la ronda anterior
+fue bien y la respuesta no es una pregunta. Esos empujones llevan `synthetic: true` y no se
+guardan en hilos ni se usan para títulos. `settleTools()` espera a que la lista de tools se
+estabilice tras cada ronda, porque un paso que abre un formulario registra las tools del
+siguiente un instante después.
+
 ## Catálogo: resolver no es aplicar
 
 `resolveContext()` devuelve el `systemContext` de las reglas que casan con la pestaña,
