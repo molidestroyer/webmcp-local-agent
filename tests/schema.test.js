@@ -298,3 +298,40 @@ test('callExecuteTool falls back to context.executeTool(tool.name, args) if tool
   assert.strictEqual(calledName, 'myTool');
   assert.deepStrictEqual(calledArgs, { a: 1 });
 });
+
+test('isMultiStepRequest: lists and "step 1" yes, one-shot requests no', () => {
+  assert.equal(S.isMultiStepRequest('1. open the form\n2. fill it\n3. save'), true);
+  assert.equal(S.isMultiStepRequest('Step 1: open the form, then fill it'), true);
+  assert.equal(S.isMultiStepRequest('- open\n- fill'), true);
+  assert.equal(S.isMultiStepRequest('add buy bread'), false);
+  assert.equal(S.isMultiStepRequest('create a contact for Ana, then tell me'), false);
+});
+
+test('toolSignature ignores order', () => {
+  assert.equal(S.toolSignature([{ name: 'b' }, { name: 'a' }]), S.toolSignature([{ name: 'a' }, { name: 'b' }]));
+  assert.notEqual(S.toolSignature([{ name: 'a' }]), S.toolSignature([{ name: 'a' }, { name: 'b' }]));
+});
+
+test('roundSucceeded rejects failures, cancellations and empty rounds', () => {
+  assert.equal(S.roundSucceeded([{ content: 'Form opened. SUCCESS' }]), true);
+  assert.equal(S.roundSucceeded([{ content: 'Error: boom' }]), false);
+  assert.equal(S.roundSucceeded([{ content: 'Status: FAILED' }]), false);
+  assert.equal(S.roundSucceeded([{ content: 'The user cancelled this tool call.' }]), false);
+  assert.equal(S.roundSucceeded([]), false);
+});
+
+test('shouldNudge: only multi-step, after success, not on questions, bounded', () => {
+  const base = {
+    request: '1. open\n2. fill',
+    reply: { content: 'Opened the form.' },
+    lastRound: [{ content: 'SUCCESS' }],
+    nudges: 0,
+    maxNudges: 10,
+  };
+  assert.equal(S.shouldNudge(base), true);
+  assert.equal(S.shouldNudge({ ...base, request: 'open the form' }), false);
+  assert.equal(S.shouldNudge({ ...base, lastRound: [{ content: 'Error: x' }] }), false);
+  assert.equal(S.shouldNudge({ ...base, lastRound: [] }), false);
+  assert.equal(S.shouldNudge({ ...base, reply: { content: 'Which company name should I use?' } }), false);
+  assert.equal(S.shouldNudge({ ...base, nudges: 10 }), false);
+});
