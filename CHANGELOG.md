@@ -2,6 +2,9 @@
 
 ## 0.7.0
 
+- El límite de rondas de tools (antes fijo en 6, `MAX_TOOL_STEPS`) es ahora un setting
+  (Settings → Agent Limits): interruptor para quitarlo y número editable, por defecto 100.
+
 - Grabación de vídeo de la sesión del agente (Settings → Session Recording, **desactivada
   por defecto**). `tabCapture.getMediaStreamId()` en el worker → `MediaRecorder` en un
   documento offscreen (`offscreen.js`) → `.webm` a `Downloads/webmcp-agent/` vía

@@ -190,6 +190,26 @@
         </label>
       </div>
 
+      <!-- Group: Agent limits -->
+      <div class="setting-card">
+        <div class="field-label">Agent Limits</div>
+        <label class="setting-item" title="Stop the agent after a maximum number of tool rounds in one turn">
+          <input type="checkbox" id="limit-rounds-toggle" checked>
+          <div class="setting-item__text">
+            <span class="setting-item__title">Limit tool rounds per message</span>
+            <span class="setting-item__desc">
+              On by default. Turn it off to let the agent keep calling tools until it decides to stop (use with care: a looping model will not be interrupted).
+            </span>
+          </div>
+        </label>
+        <label class="setting-item">
+          <div class="setting-item__text">
+            <span class="setting-item__title">Maximum tool rounds</span>
+          </div>
+          <input type="number" id="max-rounds-input" min="1" max="1000" step="1" value="100">
+        </label>
+      </div>
+
       <!-- Group: Session recording -->
       <div class="setting-card">
         <div class="field-label">Session Recording</div>

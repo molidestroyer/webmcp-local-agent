@@ -1284,6 +1284,7 @@ body {
 
 
 
+.setting-item input[type="number"],
 .setting-item select {
   flex: 0 0 auto;
   background: var(--bg-elev, #1b1b1f);
@@ -1292,5 +1293,6 @@ body {
   border-radius: 6px;
   padding: 4px 6px;
 }
+.setting-item input[type="number"]:disabled,
 .setting-item select:disabled,
 .setting-item input:disabled + .setting-item__text { opacity: 0.5; }
