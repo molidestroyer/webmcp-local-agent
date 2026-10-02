@@ -148,7 +148,9 @@ exercise the origin matching the extension does when resolving a tool.
   (GoogleChromeLabs/webmcp-tools) — the sample catalog's first rule targets it, with an
   end-to-end booking prompt and context written from the demo's source. Load *Demo sample* in
   Settings → Knowledge & Prompt Catalog, open the demo, and press 📚: the browser opens on
-  📍 *This page*. The search box takes plain text or a `/regex/`.
+  📍 *This page*. The search box takes plain text or a `/regex/`. The booking form waits for a
+  person to submit it; turn on *Submit forms that wait for review (E2E testing)* in Settings for
+  an unattended run. `e2e/hotel-chain.js` runs this whole flow headless (see its header).
 
 The same files ship inside the extension (`demo/`), so you can open them offline too.
 `demo/` is the single source for both — the workflow publishes that folder as-is.

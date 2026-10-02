@@ -136,7 +136,30 @@
     return found;
   }
 
-  function executeDeclarativeForm(form, params) {
+  /**
+   * Sets a field the way typing would. Assigning `el.value` directly is invisible to React
+   * (and similar frameworks): their value tracker sees no change on the following `input`
+   * event, so the page keeps its old state. Measured on Google's hotel-chain demo: the box
+   * showed "Carlos", the booking would have gone out as the prefilled "Jane".
+   */
+  function setFieldValue(el, value) {
+    const prop = el.type === 'checkbox' || el.type === 'radio' ? 'checked' : 'value';
+    let proto = Object.getPrototypeOf(el);
+    while (proto && !Object.getOwnPropertyDescriptor(proto, prop)) proto = Object.getPrototypeOf(proto);
+    const desc = proto && Object.getOwnPropertyDescriptor(proto, prop);
+    if (desc && desc.set) desc.set.call(el, value);
+    else el[prop] = value;
+  }
+
+  const SUBMIT_SETTLE_MS = 400;
+
+  /**
+   * Fills a <form toolname> and, when the form asks for it (`toolautosubmit`) or the user
+   * enabled "Submit declarative forms" for testing, submits it. A form that is filled but
+   * not submitted is reported as exactly that, never as a plain success: the model read
+   * `success: true` and announced a booking that had not been made.
+   */
+  async function executeDeclarativeForm(form, params, options) {
     if (!form) return { success: false, error: 'Form not found in document.' };
     const inputs = form.querySelectorAll('input, select, textarea');
     const populated = {};
@@ -146,14 +169,14 @@
       const val = params[fieldName];
 
       if (el.type === 'checkbox') {
-        el.checked = Boolean(val);
+        setFieldValue(el, Boolean(val));
       } else if (el.type === 'radio') {
-        if (el.value === String(val)) el.checked = true;
+        if (el.value === String(val)) setFieldValue(el, true);
       } else {
-        el.value = val === undefined || val === null ? '' : String(val);
+        setFieldValue(el, val === undefined || val === null ? '' : String(val));
       }
 
-      populated[fieldName] = el.value;
+      populated[fieldName] = el.type === 'checkbox' ? el.checked : el.value;
 
       try {
         el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -161,36 +184,53 @@
       } catch (_) { /* noop */ }
     }
 
-    const autoSubmitAttr = form.getAttribute('toolautosubmit');
-    const shouldSubmit = autoSubmitAttr === 'true' || autoSubmitAttr === '' || form.hasAttribute('toolautosubmit');
+    const byAttribute = form.hasAttribute('toolautosubmit') && form.getAttribute('toolautosubmit') !== 'false';
+    const shouldSubmit = byAttribute || Boolean(options && options.submitForms);
 
     if (!shouldSubmit) {
       return {
         success: true,
         submitted: false,
-        message: 'Form fields populated for review (autoSubmit is disabled).',
-        populatedFields: populated
+        message: 'Fields filled in but NOT submitted: this form waits for the user to review and submit it. '
+          + 'Nothing has been sent yet. Ask the user to press the form\'s submit button; do not report the action as done.',
+        populatedFields: populated,
       };
     }
 
+    // Let the framework commit the field updates before the submit handler reads them.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     try {
-      const submitBtn = form.querySelector('button[type="submit"], input[type="submit"], button');
-      if (submitBtn) {
-        submitBtn.click();
-      } else if (typeof form.requestSubmit === 'function') {
-        form.requestSubmit();
-      } else if (typeof form.submit === 'function') {
-        form.submit();
+      if (typeof form.requestSubmit === 'function') {
+        form.requestSubmit(); // runs constraint validation and the default submitter, like a click
+      } else {
+        const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+        if (submitBtn) submitBtn.click();
+        else form.submit();
       }
     } catch (err) {
       return { success: false, error: String((err && err.message) || err) };
     }
 
+    // A form that is still on screen afterwards was most likely rejected by the page.
+    await new Promise((resolve) => setTimeout(resolve, SUBMIT_SETTLE_MS));
+    if (form.isConnected) {
+      const invalid = [...form.querySelectorAll(':invalid, [aria-invalid="true"]')]
+        .map((el) => el.getAttribute('name') || el.id)
+        .filter(Boolean);
+      return {
+        success: true,
+        submitted: true,
+        message: 'Form submitted, but it is still on the page'
+          + (invalid.length ? '; these fields are marked invalid: ' + invalid.join(', ') : '')
+          + '. The page may have rejected it; check before reporting success.',
+        populatedFields: populated,
+      };
+    }
     return {
       success: true,
       submitted: true,
-      message: 'Declarative form populated and submitted successfully.',
-      populatedFields: populated
+      message: 'Form submitted; the page replaced it (usually a confirmation).',
+      populatedFields: populated,
     };
   }
 
@@ -304,14 +344,20 @@
           try {
             // Shape A: registerTool({ name, description, inputSchema, execute })
             // Shape B: registerTool(name, config, handler)  (MCP SDK style)
+            let name;
+            let signal;
             if (typeof args[0] === 'string') {
-              const name = args[0];
+              name = args[0];
               const config = args[1] || {};
               const handler = args[2];
               remember(Object.assign({}, config, { name, execute: handler }), label, { viaScript: true });
+              signal = args[3] && args[3].signal;
             } else {
+              name = args[0] && args[0].name;
               remember(args[0], label, { viaScript: true });
+              signal = args[1] && args[1].signal;
             }
+            forgetOnAbort(name, signal);
             notifyToolsChanged();
           } catch (_) { /* noop */ }
           return original(...args);
@@ -331,6 +377,25 @@
         };
       } catch (_) { /* noop */ }
     }
+  }
+
+  /**
+   * The current API unregisters with `registerTool(tool, { signal })` + `abort()`, not
+   * unregisterTool() (Google's use-webmcp-tool does it on every unmount). getTools()
+   * reconciliation catches that on native contexts; a polyfill without getTools() would keep
+   * the aborted tool forever. Only the entry this call created is removed: React aborts the
+   * old registration around registering the new one under the same name.
+   */
+  function forgetOnAbort(name, signal) {
+    if (typeof name !== 'string' || !signal || typeof signal.addEventListener !== 'function') return;
+    const entry = registry.get(name);
+    const forget = () => {
+      if (registry.get(name) !== entry) return;
+      registry.delete(name);
+      notifyToolsChanged();
+    };
+    if (signal.aborted) forget();
+    else signal.addEventListener('abort', forget, { once: true });
   }
 
   function contextObjects() {
@@ -528,14 +593,14 @@
     };
   }
 
-  async function executeTool(name, args, origin) {
+  async function executeTool(name, args, origin, options) {
     const params = args && typeof args === 'object' ? args : {};
     const contexts = contextObjects().map((entry) => entry.obj);
 
     // Declarative HTML form tool check: if <form toolname="..."> exists in DOM, execute it directly
     const declForm = findDeclarativeForm(name);
     if (declForm) {
-      return executeDeclarativeForm(declForm, params);
+      return executeDeclarativeForm(declForm, params, options);
     }
 
     // Primary path for JS registered tools:
@@ -572,7 +637,7 @@
     // Declarative form fallback in DOM
     const form = findDeclarativeForm(name);
     if (form) {
-      return executeDeclarativeForm(form, params);
+      return executeDeclarativeForm(form, params, options);
     }
 
     // Older shapes, and only for contexts that do not implement the current
@@ -694,7 +759,7 @@
         reply(serializable(await snapshot(data.payload)));
       } else if (data.action === 'execute') {
         const payload = data.payload || {};
-        reply(serializable(await executeTool(payload.name, payload.args, payload.origin)));
+        reply(serializable(await executeTool(payload.name, payload.args, payload.origin, { submitForms: Boolean(payload.submitForms) })));
       } else if (data.action === 'console-capture') {
         setConsoleCapture(data.payload && data.payload.enabled);
         reply({ ok: true });

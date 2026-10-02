@@ -27,6 +27,29 @@
   lo que la web **no** tiene (categoría de habitación, teléfono, casilla de términos, código de
   confirmación), para que el modelo lo diga en vez de inventarlo. Incluye el prompt E2E completo y
   otros más cortos. `demo/catalog-sample.json` y el catálogo integrado son ahora los mismos datos.
+- **Formularios declarativos: se anunciaba como hecho algo que no se había enviado.** Encontrado
+  con la prueba E2E sobre la demo de Google. Su `<form toolname="complete_booking">` no lleva
+  `toolautosubmit`, así que el hook solo lo rellenaba, pero contestaba `success: true` y el modelo
+  daba la reserva por hecha. Ahora el resultado dice «NOT submitted… do not report the action as
+  done». Nueva opción en *Settings → Agent Limits*, **Submit forms that wait for review (E2E
+  testing)**, desactivada por defecto, para que un flujo guionizado pueda terminar.
+  `toolautosubmit="false"` ya no se envía (antes bastaba con que el atributo existiera).
+- **Formularios declarativos: React no veía los valores.** Asignar `el.value` no actualiza el
+  estado de un input controlado. En la demo, la casilla mostraba «Carlos», pero la reserva habría
+  salido a nombre de la «Jane» que venía rellenada. Ahora se usa el setter nativo, como cuando se
+  escribe. Al enviar se usa `requestSubmit()` (no el primer `<button>` del formulario) y se informa
+  de si la página lo sustituyó o lo dejó en pantalla, con los campos inválidos.
+- **Tools desregistradas con `AbortSignal`.** La API actual (y `use-webmcp-tool` de Google)
+  desregistra con `registerTool(tool, { signal })` + `abort()`. En contextos nativos lo cubría
+  `getTools()`; con un polyfill sin `getTools()` la tool se quedaba para siempre.
+- **El `.log` de una sesión cuya pestaña se cerró llegaba tarde o no llegaba.** Esperaba a
+  desactivar la captura de consola en una pestaña que ya no existía.
+- **Prueba E2E en `e2e/`**: la extensión real en Chromium headless contra la demo `hotel-chain`
+  compilada en local y servida bajo su URL real, con un Ollama falso que sigue un guion y un
+  polyfill de `document.modelContext`. Comprueba el contexto del catálogo, la línea de objetivo
+  paso a paso, la desaparición de tools al navegar y el envío (o no) de la reserva. Con
+  `RECORD=1` graba de verdad (vídeo + `.log`); con `CHAOS=1` pulsa *New* a mitad de turno y
+  cierra la pestaña grabada. No forma parte de `node --test` ni del zip.
 - **Explorador de prompts: «look here».** Abre en 📍 *This page* (solo las reglas de la pestaña
   delante, incluidas las que esperan a que aparezcan sus tools) si las hay; 🌐 *All* muestra todo.
   El buscador admite `/regex/` y busca también en ids y `urlPattern`. Los prompts largos conservan

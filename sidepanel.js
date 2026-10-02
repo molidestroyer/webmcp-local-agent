@@ -126,6 +126,7 @@ const els = {
   catalogBrowseBtn: document.getElementById('catalog-browse-btn'),
   resetChatOnTabToggle: document.getElementById('reset-chat-on-tab-toggle'),
   limitRoundsToggle: document.getElementById('limit-rounds-toggle'),
+  submitFormsToggle: document.getElementById('submit-forms-toggle'),
   maxRoundsInput: document.getElementById('max-rounds-input'),
   recordSessionToggle: document.getElementById('record-session-toggle'),
   showCursorToggle: document.getElementById('show-cursor-toggle'),
@@ -214,6 +215,7 @@ const state = {
   autoSuggest: false,
   sendOnChipClick: false,
   limitRounds: true,
+  submitForms: false, // submit declarative forms that wait for review (E2E testing)
   maxToolSteps: DEFAULT_MAX_TOOL_STEPS,
   recordSession: false,
   showVirtualCursor: true,
@@ -1256,7 +1258,7 @@ function toolByName(name) {
 /** Executions always carry the origin so the hook can match the right tool. */
 function executeOnPage(name, args) {
   const tool = toolByName(name);
-  return bridge('execute', { name, args, origin: tool ? tool.origin : null });
+  return bridge('execute', { name, args, origin: tool ? tool.origin : null, submitForms: state.submitForms });
 }
 
 // Name-based icon inference lives in lib/webmcp-schema.js, with its tests.
@@ -2445,8 +2447,11 @@ async function saveSessionLog() {
   const stem = sessionStem;
   sessionLog = sessionStem = null;
   if (!log || !stem) return;
-  // Stop capturing first, so the page is left exactly as we found it.
-  await chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: log.tabId, enabled: false }).catch(() => {});
+  // Leave the page as we found it, but never make the file wait for it: when the recorded
+  // tab was just closed this round trip hangs on the bridge (2 s with no port, up to the
+  // 35 s bridge timeout with a dying one), and the .log arrived long after the video, or not
+  // at all if the panel closed first.
+  chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: log.tabId, enabled: false }).catch(() => {});
   try {
     const blob = new Blob([SL.formatSessionLog(log, Date.now())], { type: 'text/plain' });
     const where = await saveRecordingFile(blob, `${stem}.log`, await resolveRecordingsDir());
@@ -3285,6 +3290,13 @@ function normalizeMaxSteps(value) {
 function syncLimitControls() {
   if (els.maxRoundsInput) els.maxRoundsInput.disabled = !state.limitRounds;
 }
+if (els.submitFormsToggle) {
+  els.submitFormsToggle.addEventListener('change', () => {
+    state.submitForms = els.submitFormsToggle.checked;
+    chrome.storage.local.set({ submitForms: state.submitForms });
+  });
+}
+
 if (els.limitRoundsToggle) {
   els.limitRoundsToggle.addEventListener('change', () => {
     state.limitRounds = els.limitRoundsToggle.checked;
@@ -3567,6 +3579,7 @@ if (els.copilotCopyCodeBtn) {
     'autoSuggest',
     'sendOnChipClick',
     'limitRounds',
+    'submitForms',
     'maxToolSteps',
     'recordSession',
     'showVirtualCursor',
@@ -3586,6 +3599,8 @@ if (els.copilotCopyCodeBtn) {
   els.confirmTools.checked = Boolean(stored.confirmTools);
   state.autoSuggest = Boolean(stored.autoSuggest);
   state.limitRounds = stored.limitRounds !== false;
+  state.submitForms = stored.submitForms === true;
+  if (els.submitFormsToggle) els.submitFormsToggle.checked = state.submitForms;
   state.maxToolSteps = normalizeMaxSteps(stored.maxToolSteps);
   if (els.limitRoundsToggle) els.limitRoundsToggle.checked = state.limitRounds;
   if (els.maxRoundsInput) els.maxRoundsInput.value = state.maxToolSteps;

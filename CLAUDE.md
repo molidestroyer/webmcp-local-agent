@@ -445,6 +445,22 @@ lines. Two things it is easy to get wrong:
   that apply, or whose urlPattern names this URL) when there are any; the search takes
   `/regex/` and also matches ids and urlPatterns.
 
+- **Declarative form execution** (0.7.12). `page-hook.js` fills `<form toolname>` itself (since
+  0.6.21, to avoid native `execute()` promises that never settle). Three rules found by the E2E run:
+  set fields through the **prototype setter** (`setFieldValue()`): a plain `el.value =` is invisible
+  to React and the page submits its old state. A form that is filled but not submitted must say
+  **NOT submitted** in its result, never a bare `success: true`, or the model reports the action
+  as done. It submits when `toolautosubmit` is present and not `"false"`, or when the user turned
+  on `state.submitForms` (E2E testing), which travels in the `execute` payload.
+
+- **`e2e/hotel-chain.js`** drives the real extension in headless Chromium (Playwright,
+  `channel: 'chromium'`; the headless shell cannot load extensions). The panel is opened as a
+  tab, so its init script points `chrome.tabs.query({ active, currentWindow })` at the demo tab
+  and records every `hud` message. Recording works headless with
+  `--auto-select-desktop-capture-source=<page title>`. Chromium has no native WebMCP, hence the
+  polyfill. Downloads vanish when the context closes, so copy them first. Run it after touching
+  the agent loop, page-hook execution, the overlay or recording.
+
 ## Running it
 
 ```bash
