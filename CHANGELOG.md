@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.8
+
+- Nuevo ajuste *Recordings folder*. `chrome.downloads` no se puede silenciar: con «Preguntar
+  dónde guardar cada archivo» activo en Chrome, pregunta aunque se le pase `saveAs: false`.
+  Ahora se elige una carpeta una vez (`showDirectoryPicker`, el handle va a IndexedDB) y el
+  `.webm` y el `.log` se escriben ahí directamente, con el mismo nombre. Si Chrome vuelve a
+  pedir acceso en otra sesión, se pide al empezar la grabación (el clic en Send/Rec es el
+  gesto que hace falta). Sin carpeta, sin permiso o si falla la escritura, se descarga a
+  `Downloads/webmcp-agent/` como antes: una grabación nunca se pierde por un permiso.
+- Con la grabación del worker (`tabCapture`) y carpeta elegida, el worker no descarga: entrega
+  la URL del blob al panel (mismo origen) y este lo escribe.
+
 ## 0.7.7
 
 - Nuevo ajuste *Recording mode*. **Per message** es el comportamiento de siempre: un vídeo por

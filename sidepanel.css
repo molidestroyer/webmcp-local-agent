@@ -1304,3 +1304,6 @@ body {
 .rec-btn--live { color: #FCA5A5; border-color: #EF4444; }
 .rec-btn--live .rec-btn__dot { background: #EF4444; animation: rec-pulse 1.2s ease-in-out infinite; }
 @keyframes rec-pulse { 50% { opacity: .25; } }
+
+.setting-item__actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.setting-item__actions [hidden] { display: none; }

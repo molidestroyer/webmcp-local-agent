@@ -386,6 +386,14 @@ lines. Two things it is easy to get wrong:
   the button visible whenever `sessionLive`, so a recording always has a stop control. A picker
   recording lives in the panel and cannot survive it closing.
 
+- **Where recordings are saved** (0.7.8). `chrome.downloads` prompts whenever Chrome's "Ask where
+  to save each file" is on, whatever `saveAs` says, so `lib/recordings-folder.js` lets the user
+  pick a folder once (`showDirectoryPicker`, handle in IndexedDB). Everything goes through
+  `saveRecordingFile()`, which falls back to a download: a missing permission must never lose a
+  recording. Permission can only be re-requested inside a user gesture, hence the
+  `resolveRecordingsDir()` call at the top of `beginSessionCapture()`. Don't write to the folder
+  from the service worker or the offscreen document: the handle belongs to the panel.
+
 ## Running it
 
 ```bash

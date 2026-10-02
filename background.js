@@ -280,7 +280,7 @@ async function startRecording({ tabId, label, fileStem, quality, showCursor, str
   diag('INFO', `Recording started on tab ${tabId} (${preset.fps} fps).`, 'Rec/SW');
 }
 
-async function stopRecording() {
+async function stopRecording({ download = true } = {}) {
   if (!recording) return { skipped: true };
   const { tabId, label, fileStem, showCursor } = recording;
   recording = null;
@@ -293,9 +293,14 @@ async function stopRecording() {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     stem = `${stamp}-${String(label).replace(/[^\w-]+/g, '_').slice(0, 40)}`;
   }
-  await chrome.downloads.download({ url: answer.url, filename: `webmcp-agent/${stem}.webm`, saveAs: false });
-  // Give the download time to read the blob before it is revoked.
+  // Give whoever reads the blob (the download, or the panel) time before it is revoked.
   setTimeout(() => chrome.offscreen.closeDocument().catch(() => {}), 60000);
+  if (!download) {
+    // The panel writes it into the user's recordings folder; the blob URL is same-origin.
+    diag('INFO', `Recording ready for the panel (${Math.round(answer.size / 1024)} KB).`, 'Rec/SW');
+    return { size: answer.size, url: answer.url, stem };
+  }
+  await chrome.downloads.download({ url: answer.url, filename: `webmcp-agent/${stem}.webm`, saveAs: false });
   diag('INFO', `Recording saved (${Math.round(answer.size / 1024)} KB).`, 'Rec/SW');
   return { size: answer.size };
 }
@@ -541,7 +546,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'RECORDING_STOP') {
-    stopRecording()
+    stopRecording({ download: message.download !== false })
       .then((data) => sendResponse({ success: true, ...data }))
       .catch((err) => {
         diag('ERROR', 'Could not save the recording: ' + err.message, 'Rec/SW');

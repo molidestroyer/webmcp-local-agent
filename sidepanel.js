@@ -124,6 +124,9 @@ const els = {
   recordQuality: document.getElementById('record-quality'),
   recordMode: document.getElementById('record-mode'),
   recBtn: document.getElementById('rec-btn'),
+  recFolderStatus: document.getElementById('rec-folder-status'),
+  recFolderPick: document.getElementById('rec-folder-pick'),
+  recFolderClear: document.getElementById('rec-folder-clear'),
   recBtnLabel: document.getElementById('rec-btn-label'),
   catalogSourceNone: document.getElementById('catalog-source-none'),
   catalogSourceDemo: document.getElementById('catalog-source-demo'),
@@ -2085,6 +2088,8 @@ let recordingDeclined = false; // the user cancelled the picker; do not ask agai
 
 async function beginSessionCapture() {
   if (sessionLive) return true;
+  // Re-grant folder access now, while the click that got us here still counts as a gesture.
+  await resolveRecordingsDir().catch(() => null);
   const started = await startSessionRecording();
   if (started) {
     await startSessionLog();
@@ -2208,10 +2213,8 @@ async function saveSessionLog() {
   await chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: log.tabId, enabled: false }).catch(() => {});
   try {
     const blob = new Blob([formatSessionLog(log, Date.now())], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    await chrome.downloads.download({ url, filename: `webmcp-agent/${stem}.log`, saveAs: false });
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-    console.log('[Rec] Session log saved (' + log.lines.length + ' line(s)).');
+    const where = await saveRecordingFile(blob, `${stem}.log`, await resolveRecordingsDir());
+    console.log('[Rec] Session log saved to ' + where + ' (' + log.lines.length + ' line(s)).');
   } catch (err) {
     showStatus('Could not save the session log: ' + String((err && err.message) || err));
   }
@@ -2298,6 +2301,70 @@ async function startSessionRecording() {
   return true;
 }
 
+// --- Where recordings go -----------------------------------------------------
+
+const Folder = globalThis.__WebMCPRecordingsFolder;
+const FOLDER_UNSET_TEXT = els.recFolderStatus ? els.recFolderStatus.textContent : '';
+
+/** The chosen folder if it can be written to right now, else null (downloads are the fallback). */
+async function resolveRecordingsDir() {
+  if (!Folder) return null;
+  const handle = await Folder.load();
+  return (await Folder.ensurePermission(handle)) ? handle : null;
+}
+
+async function renderRecordingsFolder() {
+  if (!Folder || !els.recFolderStatus) return;
+  const handle = await Folder.load();
+  els.recFolderClear.hidden = !handle;
+  els.recFolderPick.textContent = handle ? 'Change…' : 'Choose…';
+  els.recFolderStatus.textContent = handle
+    ? `Saving to the folder "${handle.name}". If Chrome asks again for access, allow it the next time you start a recording; until then files go to Downloads/webmcp-agent/.`
+    : FOLDER_UNSET_TEXT;
+}
+
+if (els.recFolderPick) {
+  els.recFolderPick.addEventListener('click', async () => {
+    if (!Folder || !Folder.supported()) {
+      showStatus('This browser cannot pick a folder; recordings keep going to Downloads.');
+      return;
+    }
+    try {
+      await Folder.pick();
+    } catch (err) {
+      if (!err || err.name !== 'AbortError') showStatus('Could not use that folder: ' + String((err && err.message) || err));
+    }
+    renderRecordingsFolder();
+  });
+}
+if (els.recFolderClear) {
+  els.recFolderClear.addEventListener('click', async () => {
+    await Folder.forget().catch(() => {});
+    renderRecordingsFolder();
+  });
+}
+
+/**
+ * Saves a blob URL (or a Blob) as `name`. Into the chosen folder when it is writable,
+ * else through chrome.downloads, so a recording is never lost over a permission.
+ */
+async function saveRecordingFile(source, name, dir) {
+  if (dir) {
+    try {
+      const data = typeof source === 'string' ? await (await fetch(source)).blob() : source;
+      await Folder.writeFile(dir, name, data);
+      return 'folder';
+    } catch (err) {
+      console.warn('[Rec] Could not write into the recordings folder, using Downloads: ' + String((err && err.message) || err));
+    }
+  }
+  const url = typeof source === 'string' ? source : URL.createObjectURL(source);
+  await chrome.downloads.download({ url, filename: `webmcp-agent/${name}`, saveAs: false });
+  // The download reads the blob asynchronously; revoke it afterwards.
+  if (typeof source !== 'string') setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return 'downloads';
+}
+
 async function stopPanelRecording() {
   const recorder = panelRecorder;
   const info = panelRecording;
@@ -2307,9 +2374,8 @@ async function stopPanelRecording() {
   }
   try {
     const { url, size } = await recorder.stop();
-    await chrome.downloads.download({ url, filename: `webmcp-agent/${info.stem}.webm`, saveAs: false });
-    console.log('[Rec] Recording saved (' + Math.round(size / 1024) + ' KB).');
-    // The download reads the blob asynchronously; revoke it afterwards.
+    const where = await saveRecordingFile(url, `${info.stem}.webm`, await resolveRecordingsDir());
+    console.log('[Rec] Recording saved to ' + where + ' (' + Math.round(size / 1024) + ' KB).');
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (err) {
     showStatus('Could not save the recording: ' + String((err && err.message) || err));
@@ -2319,9 +2385,22 @@ async function stopPanelRecording() {
 async function stopSessionRecording() {
   sessionLive = false;
   if (panelRecorder) return stopPanelRecording();
-  const reply = await chrome.runtime.sendMessage({ type: 'RECORDING_STOP' })
+  const dir = await resolveRecordingsDir();
+  const reply = await chrome.runtime.sendMessage({ type: 'RECORDING_STOP', download: !dir })
     .catch((err) => ({ success: false, error: String((err && err.message) || err) }));
-  if (!reply || !reply.success) showStatus('Could not save the recording: ' + ((reply && reply.error) || 'unknown error'));
+  if (!reply || !reply.success) {
+    showStatus('Could not save the recording: ' + ((reply && reply.error) || 'unknown error'));
+    return;
+  }
+  // With a folder the worker hands the video over instead of downloading it.
+  if (dir && reply.url) {
+    try {
+      const where = await saveRecordingFile(reply.url, `${reply.stem}.webm`, dir);
+      console.log('[Rec] Recording saved to ' + where + '.');
+    } catch (err) {
+      showStatus('Could not save the recording: ' + String((err && err.message) || err));
+    }
+  }
 }
 
 const MAX_NUDGES = 10;
@@ -3222,6 +3301,7 @@ if (els.copilotCopyCodeBtn) {
   if (els.recordMode) els.recordMode.value = state.recordMode;
   if (els.recordQuality) els.recordQuality.value = state.recordQuality;
   syncRecordingControls();
+  renderRecordingsFolder();
   if (els.autoSuggestToggle) els.autoSuggestToggle.checked = state.autoSuggest;
   state.resetChatOnTabSwitch = Boolean(stored.resetChatOnTabSwitch);
   if (els.resetChatOnTabToggle) els.resetChatOnTabToggle.checked = state.resetChatOnTabSwitch;
