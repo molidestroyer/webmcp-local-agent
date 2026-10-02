@@ -402,6 +402,13 @@ lines. Two things it is easy to get wrong:
   free: it reads what the model already emitted and falls back to a label from the tool name.
   Never add a request, or a required field, just to feed it.
 
+- **Fixed extension ID** (0.7.11). `manifest.json` carries a `key` (public half only), so the ID is
+  always `jiadmihhccjnmohgemenocmifipigolh` whatever folder an unpacked copy is loaded from. Storage is per ID, and the
+  Copilot login, settings, chats and the recordings folder handle live in it. **Never remove or
+  regenerate the key**: every user would lose that storage. `tests/manifest.test.js` guards it.
+  The private key was not kept; only the public key is needed to load unpacked. If the extension is
+  ever published on the Chrome Web Store, check how it treats a manifest `key` first.
+
 ## Running it
 
 ```bash

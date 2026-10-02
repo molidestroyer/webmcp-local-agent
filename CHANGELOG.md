@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.11
+
+- **ID de extensión fijo.** Sin `key` en el manifest, Chrome deriva el ID de la carpeta desde la
+  que se carga una extensión desempaquetada, y `chrome.storage.local` e IndexedDB van por ID:
+  cargar otra carpeta (otra rama, otra descarga de la release) empezaba con el almacenamiento
+  vacío, sin el login de Copilot, ajustes, chats, catálogo ni carpeta de grabaciones. El
+  manifest lleva ahora una clave pública, y el ID es siempre `jiadmihhccjnmohgemenocmifipigolh`, cargues desde donde cargues.
+  **Esta versión cambia el ID una vez**: el almacenamiento de la instalación anterior no se
+  traslada, hay que volver a iniciar sesión en Copilot y a elegir la carpeta de grabaciones.
+  `tests/manifest.test.js` falla si la clave desaparece o cambia.
+
 ## 0.7.10
 
 - Pulsar una sugerencia (📌 del catálogo o ✨ de la IA) ya **no envía**: pone el texto en el
