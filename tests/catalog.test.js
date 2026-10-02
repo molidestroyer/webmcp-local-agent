@@ -56,3 +56,27 @@ test('returns empty context when no rules match', () => {
   assert.strictEqual(res.suggestedPrompts.length, 0);
   assert.strictEqual(res.systemContext, '');
 });
+
+test('lists a rule\'s prompts and flags entries that are not usable text', () => {
+  const rule = { id: 'r', name: 'R', suggestedPrompts: ['Create a contact', '', 42, { a: 1 }] };
+  assert.deepStrictEqual(C.listRulePrompts(rule), [
+    { text: 'Create a contact', valid: true },
+    { text: '', valid: false },
+    { text: '42', valid: false },
+    { text: '{"a":1}', valid: false },
+  ]);
+});
+
+test('a rule without prompts lists none', () => {
+  assert.deepStrictEqual(C.listRulePrompts({ id: 'r', name: 'R' }), []);
+  assert.deepStrictEqual(C.listRulePrompts({ id: 'r', name: 'R', suggestedPrompts: 'oops' }), []);
+  assert.deepStrictEqual(C.listRulePrompts(null), []);
+});
+
+test('the demo catalog prompts are all usable', () => {
+  for (const rule of C.DEMO_SAMPLE_CATALOG.rules) {
+    const prompts = C.listRulePrompts(rule);
+    assert.ok(prompts.length > 0);
+    assert.ok(prompts.every((p) => p.valid));
+  }
+});

@@ -116,6 +116,7 @@ const els = {
   suggestionsChips: document.getElementById('suggestions-chips'),
   // settings
   autoSuggestToggle: document.getElementById('auto-suggest-toggle'),
+  sendOnChipToggle: document.getElementById('send-on-chip-toggle'),
   resetChatOnTabToggle: document.getElementById('reset-chat-on-tab-toggle'),
   limitRoundsToggle: document.getElementById('limit-rounds-toggle'),
   maxRoundsInput: document.getElementById('max-rounds-input'),
@@ -204,6 +205,7 @@ const state = {
   busy: false,
   ollamaOk: false,
   autoSuggest: false,
+  sendOnChipClick: false,
   limitRounds: true,
   maxToolSteps: DEFAULT_MAX_TOOL_STEPS,
   recordSession: false,
@@ -628,6 +630,24 @@ function renderCatalogRulesInspector() {
     ctx.textContent = rule.systemContext || 'No business rules (systemContext)';
 
     card.append(title, match, ctx);
+
+    const prompts = C.listRulePrompts(rule);
+    if (prompts.length) {
+      const list = document.createElement('ul');
+      list.className = 'rule-card__prompts';
+      for (const prompt of prompts) {
+        const item = document.createElement('li');
+        item.className = 'rule-card__prompt' + (prompt.valid ? '' : ' rule-card__prompt--invalid');
+        item.textContent = prompt.valid ? prompt.text : `Not usable as a prompt: ${prompt.text || '(empty)'}`;
+        list.appendChild(item);
+      }
+      card.appendChild(list);
+    } else {
+      const none = document.createElement('div');
+      none.className = 'rule-card__none';
+      none.textContent = 'No suggested prompts';
+      card.appendChild(none);
+    }
     els.catalogRulesList.appendChild(card);
   }
 }
@@ -729,6 +749,25 @@ function clearSuggestions() {
   if (els.suggestionsChips) els.suggestionsChips.textContent = '';
 }
 
+/**
+ * A clicked suggestion goes to the message box, caret at the end, ready to read or edit.
+ * It is sent right away only if the user asked for that in Settings, or holds Shift.
+ */
+function useSuggestion(text, event) {
+  els.input.value = text;
+  autoGrow();
+  updateSendState();
+  els.input.focus();
+  els.input.setSelectionRange(text.length, text.length);
+  if (state.sendOnChipClick || (event && event.shiftKey)) sendMessage();
+}
+
+function chipHint() {
+  return state.sendOnChipClick
+    ? 'Click to send. The text is also in the message box.'
+    : 'Click to put it in the message box. Shift+Click to send straight away.';
+}
+
 function renderSuggestions() {
   if (!els.suggestionsChips) return;
   els.suggestionsChips.textContent = '';
@@ -759,12 +798,8 @@ function renderSuggestions() {
       chip.type = 'button';
       chip.className = 'chip-suggestion chip-suggestion--static';
       chip.textContent = '📌 ' + text;
-      chip.addEventListener('click', () => {
-        els.input.value = text;
-        autoGrow();
-        updateSendState();
-        sendMessage();
-      });
+      chip.title = chipHint();
+      chip.addEventListener('click', (event) => useSuggestion(text, event));
       els.suggestionsChips.appendChild(chip);
     }
   }
@@ -776,12 +811,8 @@ function renderSuggestions() {
       chip.type = 'button';
       chip.className = 'chip-suggestion chip-suggestion--ai';
       chip.textContent = '✨ ' + text;
-      chip.addEventListener('click', () => {
-        els.input.value = text;
-        autoGrow();
-        updateSendState();
-        sendMessage();
-      });
+      chip.title = chipHint();
+      chip.addEventListener('click', (event) => useSuggestion(text, event));
       els.suggestionsChips.appendChild(chip);
     }
   }
@@ -2582,6 +2613,14 @@ els.modelSelect.addEventListener('change', () => {
   }
 });
 
+if (els.sendOnChipToggle) {
+  els.sendOnChipToggle.addEventListener('change', () => {
+    state.sendOnChipClick = els.sendOnChipToggle.checked;
+    chrome.storage.local.set({ sendOnChipClick: state.sendOnChipClick });
+    renderSuggestions(); // the tooltips describe the current behaviour
+  });
+}
+
 if (els.autoSuggestToggle) {
   els.autoSuggestToggle.addEventListener('change', () => {
     state.autoSuggest = els.autoSuggestToggle.checked;
@@ -3290,6 +3329,7 @@ if (els.copilotCopyCodeBtn) {
     'confirmTools',
     'activeTab',
     'autoSuggest',
+    'sendOnChipClick',
     'limitRounds',
     'maxToolSteps',
     'recordSession',
@@ -3328,6 +3368,8 @@ if (els.copilotCopyCodeBtn) {
   syncRecordingControls();
   renderRecordingsFolder();
   if (els.autoSuggestToggle) els.autoSuggestToggle.checked = state.autoSuggest;
+  state.sendOnChipClick = Boolean(stored.sendOnChipClick);
+  if (els.sendOnChipToggle) els.sendOnChipToggle.checked = state.sendOnChipClick;
   state.resetChatOnTabSwitch = Boolean(stored.resetChatOnTabSwitch);
   if (els.resetChatOnTabToggle) els.resetChatOnTabToggle.checked = state.resetChatOnTabSwitch;
 
