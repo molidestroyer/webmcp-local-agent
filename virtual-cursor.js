@@ -11,8 +11,9 @@
  * see events the page's scripts dispatch.
  *
  * That still leaves tools that change state without any DOM event, so the panel
- * also tells this script when a tool starts and ends (`hud`), and a small banner
- * in the corner names it. That banner is what makes the video readable.
+ * also tells this script when a tool starts and ends (`hud`): a stack of cards in a
+ * corner of the user's choice names each call, and a goal line above it says what the
+ * agent is after. That is what makes the video readable.
  */
 (() => {
   'use strict';
@@ -146,78 +147,214 @@
   }
 
   // --- Tool banner (HUD) ---------------------------------------------------
+  //
+  // A stack of cards, newest at the bottom, plus one goal line at the top. A tool that
+  // resolves in 3 ms must still be readable in the video, so a card stays up for a minimum
+  // time whatever the tool did, and a burst never fills the frame.
 
-  const HUD_DONE_MS = 1500;
-  const HUD_FAIL_MS = 3000;
-  const HUD_STALE_MS = 60000; // an 'end' that never arrives must not leave a card forever
+  const HUD_MAX_VISIBLE = 4;
+  const HUD_MIN_VISIBLE_MS = 2800;
+  const HUD_OK_LINGER_MS = 1500;
+  const HUD_FAIL_LINGER_MS = 3000;
+  const HUD_FADE_MS = 320;
+  const HUD_EVICT_FADE_MS = 140; // cards pushed out by a burst leave quickly
+  const HUD_STALE_MS = 60000;    // an 'end' that never arrives must not leave a card forever
 
+  /**
+   * The timing and capacity rules, with no DOM, so they can be tested. Callers pass `now`.
+   * add() returns the ids pushed out by the capacity limit (oldest finished first);
+   * finish() returns how many ms the card still has to stay up.
+   */
+  function createHudStack({
+    maxVisible = HUD_MAX_VISIBLE,
+    minVisibleMs = HUD_MIN_VISIBLE_MS,
+    okLingerMs = HUD_OK_LINGER_MS,
+    failLingerMs = HUD_FAIL_LINGER_MS,
+  } = {}) {
+    const entries = []; // oldest first
+
+    return {
+      add(id, now) {
+        entries.push({ id, startedAt: now, endedAt: null });
+        const evicted = [];
+        while (entries.length > maxVisible) {
+          let index = entries.findIndex((e) => e.endedAt !== null);
+          if (index < 0) index = 0; // all still running: the oldest goes, never the new one
+          evicted.push(entries.splice(index, 1)[0].id);
+        }
+        return evicted;
+      },
+      finish(id, ok, now) {
+        const entry = entries.find((e) => e.id === id);
+        if (!entry) return null;
+        entry.endedAt = now;
+        const linger = ok ? okLingerMs : failLingerMs;
+        return Math.max(now + linger, entry.startedAt + minVisibleMs) - now;
+      },
+      remove(id) {
+        const index = entries.findIndex((e) => e.id === id);
+        if (index >= 0) entries.splice(index, 1);
+        return index >= 0;
+      },
+      size: () => entries.length,
+      ids: () => entries.map((e) => e.id),
+    };
+  }
+
+  const stack = createHudStack();
+  const HUD_CORNERS = ['top-right', 'top-left', 'bottom-right', 'bottom-left'];
+  let hudCorner = 'top-right';
   let hudHost = null;
+  let hudBox = null;
   let hudList = null;
-  const hudCards = new Map(); // call id -> { card, status }
+  let hudGoal = null;
+  let goalText = '';
+  let goalSetAt = 0;
+  let goalTimer = null;
+  const hudCards = new Map(); // call id -> { card, status, timer }
 
   function mountHud() {
     if (hudHost) return;
     hudHost = document.createElement('div');
     hudHost.setAttribute('aria-hidden', 'true');
-    hudHost.style.cssText = 'all:initial;position:fixed;top:0;right:0;pointer-events:none;z-index:' + Z + ';';
+    hudHost.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:' + Z + ';';
     const root = hudHost.attachShadow({ mode: 'closed' });
     root.innerHTML = `
       <style>
-        .list { position: fixed; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px;
-          max-width: 360px; font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        :host { font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .hud { position: fixed; display: flex; flex-direction: column; gap: 8px; max-width: 380px;
+          max-height: calc(100vh - 32px); }
+        .hud[data-corner^="top"] { top: 16px; }
+        .hud[data-corner^="bottom"] { bottom: 16px; }
+        .hud[data-corner$="right"] { right: 16px; align-items: flex-end; }
+        .hud[data-corner$="left"] { left: 16px; align-items: flex-start; }
+        .goal { display: none; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px;
+          background: rgba(79,70,229,.95); color: #fff; font-weight: 600; font-size: 14px;
+          box-shadow: 0 10px 25px -5px rgba(0,0,0,.5); transition: opacity .3s; }
+        .goal.on { display: flex; animation: in .25s ease-out; }
+        .goal.out { opacity: 0; }
+        .goal::before { content: "\\1F3AF"; }
+        .list { display: flex; flex-direction: column; justify-content: flex-end; gap: 8px;
+          min-height: 0; overflow: hidden; } /* a tall stack gives way before the goal line does */
         .card { background: rgba(17,24,39,.92); color: #fff; border: 1px solid rgba(255,255,255,.15);
           border-left: 4px solid #6366F1; border-radius: 8px; padding: 10px 14px;
           box-shadow: 0 10px 25px -5px rgba(0,0,0,.5); animation: in .25s ease-out;
-          transition: opacity .3s, transform .3s, border-color .2s; }
+          transition: opacity ${HUD_FADE_MS}ms, transform ${HUD_FADE_MS}ms, border-color .2s; }
         .card.ok { border-left-color: #10B981; }
         .card.fail { border-left-color: #EF4444; }
         .card.out { opacity: 0; transform: translateY(-10px); }
+        .card.out.fast { transition-duration: ${HUD_EVICT_FADE_MS}ms; }
         .title { display: flex; gap: 6px; align-items: center; font-weight: 600; color: #A5B4FC; word-break: break-all; }
         .ok .title { color: #6EE7B7; }
         .fail .title { color: #FCA5A5; }
         .status { margin-left: auto; font-weight: 400; font-size: 11px; color: #94A3B8; white-space: nowrap; }
         .args { margin-top: 4px; color: #CBD5E1; font: 11px/1.4 ui-monospace, Menlo, Consolas, monospace;
           white-space: pre-wrap; word-break: break-all; }
-        @keyframes in { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+        @keyframes in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
       </style>
-      <div class="list"></div>`;
+      <div class="hud" data-corner="${hudCorner}">
+        <div class="goal"><span class="goal-text"></span></div>
+        <div class="list"></div>
+      </div>`;
+    hudBox = root.querySelector('.hud');
     hudList = root.querySelector('.list');
+    hudGoal = root.querySelector('.goal');
     (document.documentElement || document).appendChild(hudHost);
   }
 
-  function removeHudCard(id) {
+  function unmountHudIfIdle() {
+    if (hudHost && !hudCards.size && !goalText) {
+      hudHost.remove();
+      hudHost = hudBox = hudList = hudGoal = null;
+    }
+  }
+
+  function dropHudCard(id, fast) {
     const entry = hudCards.get(id);
     if (!entry) return;
     hudCards.delete(id);
+    stack.remove(id);
+    clearTimeout(entry.timer);
     entry.card.classList.add('out');
+    if (fast) entry.card.classList.add('fast');
     setTimeout(() => {
       entry.card.remove();
-      if (!hudCards.size && hudHost) {
-        hudHost.remove();
-        hudHost = hudList = null;
-      }
-    }, 320);
+      unmountHudIfIdle();
+    }, fast ? HUD_EVICT_FADE_MS : HUD_FADE_MS);
+  }
+
+  /** Slides the cards already on screen to their new place instead of jumping. */
+  function animateShift(before) {
+    for (const [id, entry] of hudCards) {
+      const was = before.get(id);
+      if (was === undefined) continue;
+      const delta = was - entry.card.getBoundingClientRect().top;
+      if (!delta) continue;
+      entry.card.style.transition = 'none';
+      entry.card.style.transform = `translateY(${delta}px)`;
+      entry.card.getBoundingClientRect(); // commit the start position
+      entry.card.style.transition = '';
+      entry.card.style.transform = '';
+    }
+  }
+
+  function setGoal(text) {
+    text = String(text || '').trim();
+    if (text === goalText) return;
+    clearTimeout(goalTimer);
+    if (text) {
+      mountHud();
+      goalText = text;
+      goalSetAt = Date.now();
+      hudGoal.querySelector('.goal-text').textContent = text;
+      hudGoal.classList.remove('out');
+      hudGoal.classList.add('on');
+      return;
+    }
+    // Cleared: let the last goal be read for its minimum time first.
+    const wait = Math.max(0, goalSetAt + HUD_MIN_VISIBLE_MS - Date.now());
+    goalTimer = setTimeout(() => {
+      goalText = '';
+      if (hudGoal) hudGoal.classList.add('out');
+      setTimeout(() => {
+        if (hudGoal && !goalText) hudGoal.classList.remove('on');
+        unmountHudIfIdle();
+      }, HUD_FADE_MS);
+    }, wait);
   }
 
   /**
-   * payload: { phase: 'start', id, tool, args } | { phase: 'end', id, ok }.
-   * Everything is set with textContent: tool names and arguments come from the
+   * payload: { phase: 'start', id, tool, args } | { phase: 'end', id, ok } | { phase: 'goal', text },
+   * each optionally with `corner` (top-right | top-left | bottom-right | bottom-left).
+   * Everything is set with textContent: tool names, arguments and goals come from the
    * model and the page, and must never be parsed as markup.
    */
   function hud(payload) {
-    if (!payload || payload.id === undefined) return;
+    if (!payload) return;
+    // The panel sends its corner setting with every message, so a change applies at once.
+    if (HUD_CORNERS.includes(payload.corner) && payload.corner !== hudCorner) {
+      hudCorner = payload.corner;
+      if (hudBox) hudBox.dataset.corner = hudCorner;
+    }
+    if (payload.phase === 'goal') {
+      setGoal(payload.text);
+      return;
+    }
+    if (payload.id === undefined) return;
     const id = String(payload.id);
     if (payload.phase === 'start') {
       mountHud();
+      const before = new Map();
+      for (const [key, entry] of hudCards) before.set(key, entry.card.getBoundingClientRect().top);
       const card = document.createElement('div');
       card.className = 'card';
       const title = document.createElement('div');
       title.className = 'title';
       const name = document.createElement('span');
-      name.textContent = '\u26A1 ' + String(payload.tool || 'tool');
+      name.textContent = '⚡ ' + String(payload.tool || 'tool');
       const status = document.createElement('span');
       status.className = 'status';
-      status.textContent = 'running\u2026';
+      status.textContent = 'running…';
       title.append(name, status);
       card.appendChild(title);
       if (payload.args) {
@@ -227,8 +364,10 @@
         card.appendChild(args);
       }
       hudList.appendChild(card);
-      hudCards.set(id, { card, status });
-      setTimeout(() => removeHudCard(id), HUD_STALE_MS);
+      const entry = { card, status, timer: setTimeout(() => dropHudCard(id), HUD_STALE_MS) };
+      hudCards.set(id, entry);
+      for (const gone of stack.add(id, Date.now())) dropHudCard(gone, true);
+      animateShift(before);
       return;
     }
     if (payload.phase === 'end') {
@@ -236,8 +375,10 @@
       if (!entry) return;
       const ok = Boolean(payload.ok);
       entry.card.classList.add(ok ? 'ok' : 'fail');
-      entry.status.textContent = ok ? '\u2713 done' : '\u2717 failed';
-      setTimeout(() => removeHudCard(id), ok ? HUD_DONE_MS : HUD_FAIL_MS);
+      entry.status.textContent = ok ? '✓ done' : '✗ failed';
+      const stayMs = stack.finish(id, ok, Date.now());
+      clearTimeout(entry.timer);
+      entry.timer = setTimeout(() => dropHudCard(id), stayMs === null ? 0 : stayMs);
     }
   }
 
@@ -255,5 +396,6 @@
     else unmount();
   }
 
-  globalThis[FLAG] = { setEnabled, hud };
+  globalThis[FLAG] = { setEnabled, hud, createHudStack };
+  if (typeof module === 'object' && module.exports) module.exports = { createHudStack };
 })();
