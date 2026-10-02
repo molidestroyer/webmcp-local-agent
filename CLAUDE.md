@@ -379,6 +379,13 @@ lines. Two things it is easy to get wrong:
   from the service worker it has no window to anchor to and returns an empty id at once.
   The worker answers `needsPicker`; the panel picks and hands back `streamId` + `source`.
 
+- **Recording modes** (0.7.7). `state.recordMode` is `turn` (stop when the agent answers) or
+  `session` (stop only on the Rec button). Both go through `beginSessionCapture()` /
+  `endSessionCapture()`; never call `stopSessionRecording()` from `runAgent`'s `finally`
+  directly, or a continuous recording ends after the first message. `updateRecButton()` keeps
+  the button visible whenever `sessionLive`, so a recording always has a stop control. A picker
+  recording lives in the panel and cannot survive it closing.
+
 ## Running it
 
 ```bash

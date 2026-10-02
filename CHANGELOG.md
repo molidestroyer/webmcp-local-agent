@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.7
+
+- Nuevo ajuste *Recording mode*. **Per message** es el comportamiento de siempre: un vídeo por
+  mensaje, que se cierra cuando el agente responde. **Until I stop it** empieza con el primer
+  mensaje y sigue a través de varios mensajes, tools y navegaciones hasta que se pulsa el botón
+  *Rec* / *Stop mm:ss* de la cabecera del chat: un solo `.webm` (y un solo `.log`) para un
+  recorrido completo. El botón también arranca la grabación antes de escribir nada.
+- Si se cancela el selector de pestañas en modo continuo, no se vuelve a abrir en cada mensaje;
+  pulsar *Rec* lo reintenta. El `.log` marca cada mensaje del usuario (`[chat] User: …`) para
+  leer una grabación larga contra la conversación.
+- Cerrar el panel durante una grabación del worker (`tabCapture`) la termina y la guarda; una
+  grabación del selector vive en el panel y se pierde al cerrarlo, así que hay que parar antes.
+
 ## 0.7.6
 
 - El vídeo no dejaba ver qué hacía el agente: las tools de WebMCP se ejecutan con

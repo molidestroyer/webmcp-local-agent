@@ -1296,3 +1296,11 @@ body {
 .setting-item input[type="number"]:disabled,
 .setting-item select:disabled,
 .setting-item input:disabled + .setting-item__text { opacity: 0.5; }
+
+/* Continuous recording control in the chat header. */
+.rec-btn { display: inline-flex; align-items: center; gap: 5px; }
+.rec-btn[hidden] { display: none; }
+.rec-btn__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); }
+.rec-btn--live { color: #FCA5A5; border-color: #EF4444; }
+.rec-btn--live .rec-btn__dot { background: #EF4444; animation: rec-pulse 1.2s ease-in-out infinite; }
+@keyframes rec-pulse { 50% { opacity: .25; } }

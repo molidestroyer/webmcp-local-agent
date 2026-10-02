@@ -122,6 +122,9 @@ const els = {
   recordSessionToggle: document.getElementById('record-session-toggle'),
   showCursorToggle: document.getElementById('show-cursor-toggle'),
   recordQuality: document.getElementById('record-quality'),
+  recordMode: document.getElementById('record-mode'),
+  recBtn: document.getElementById('rec-btn'),
+  recBtnLabel: document.getElementById('rec-btn-label'),
   catalogSourceNone: document.getElementById('catalog-source-none'),
   catalogSourceDemo: document.getElementById('catalog-source-demo'),
   catalogSourceRemote: document.getElementById('catalog-source-remote'),
@@ -202,6 +205,7 @@ const state = {
   recordSession: false,
   showVirtualCursor: false,
   recordQuality: 'standard',
+  recordMode: 'turn', // 'turn' | 'session'
   resetChatOnTabSwitch: false,
   suggesting: false,
   staticSuggestions: [],
@@ -2071,22 +2075,89 @@ async function copilotChat(messages, tools, onChunk) {
 }
 
 /**
- * Recording wraps the whole agent turn, so it is one place that starts it and
- * one `finally` that stops it: runAgent has several early returns.
+ * Two lifetimes for one recording. 'turn' wraps a single agent turn (start on send, stop
+ * when it answers). 'session' starts with the first message and runs across messages and
+ * navigations until the user presses Rec. Either way there is one start and one stop path
+ * (beginSessionCapture / endSessionCapture), because runAgent has several early returns.
  * A failure to record is reported but never blocks the agent.
  */
+let recordingDeclined = false; // the user cancelled the picker; do not ask again every message
+
+async function beginSessionCapture() {
+  if (sessionLive) return true;
+  const started = await startSessionRecording();
+  if (started) {
+    await startSessionLog();
+    sessionStartedAt = Date.now();
+  } else if (state.recordSession && state.recordMode === 'session') {
+    recordingDeclined = true;
+  }
+  updateRecButton();
+  return started;
+}
+
+async function endSessionCapture() {
+  if (!sessionLive) return;
+  await stopSessionRecording();
+  await saveSessionLog();
+  updateRecButton();
+}
+
 async function runAgent() {
-  const recording = await startSessionRecording();
-  if (recording) await startSessionLog();
+  if (!(state.recordMode === 'session' && recordingDeclined)) await beginSessionCapture();
+  // A marker per message, so a long recording can be read against the conversation.
+  logSession('chat', 'User: ' + compactJson(lastUserRequest(), 200));
   try {
     await runAgentLoop();
   } finally {
-    if (recording) {
-      await stopSessionRecording();
-      await saveSessionLog();
-    }
+    if (state.recordMode !== 'session') await endSessionCapture();
   }
 }
+
+let sessionStartedAt = 0;
+let recTimer = null;
+
+function updateRecButton() {
+  const btn = els.recBtn;
+  if (!btn) return;
+  // Always reachable while live, so a recording can never be left without a stop button.
+  btn.hidden = !(sessionLive || (state.recordSession && state.recordMode === 'session'));
+  btn.classList.toggle('rec-btn--live', sessionLive);
+  btn.title = sessionLive ? 'Stop recording and save the video and log' : 'Start recording this session';
+  if (sessionLive && !recTimer) recTimer = setInterval(updateRecButton, 1000);
+  if (!sessionLive && recTimer) { clearInterval(recTimer); recTimer = null; }
+  if (!sessionLive) {
+    els.recBtnLabel.textContent = 'Rec';
+    return;
+  }
+  const secs = Math.floor((Date.now() - sessionStartedAt) / 1000);
+  const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+  const ss = String(secs % 60).padStart(2, '0');
+  els.recBtnLabel.textContent = `Stop ${mm}:${ss}`;
+}
+
+if (els.recBtn) {
+  els.recBtn.addEventListener('click', async () => {
+    els.recBtn.disabled = true;
+    try {
+      if (sessionLive) {
+        await endSessionCapture();
+      } else {
+        recordingDeclined = false;
+        await beginSessionCapture();
+      }
+    } finally {
+      els.recBtn.disabled = false;
+      updateRecButton();
+    }
+  });
+}
+
+// Closing the panel cannot save a picker recording (its recorder dies with the panel), but
+// a worker-side one can still be finished instead of being left running forever.
+window.addEventListener('pagehide', () => {
+  if (sessionLive && !panelRecorder) chrome.runtime.sendMessage({ type: 'RECORDING_STOP' }).catch(() => {});
+});
 
 /**
  * Next to the video: what the page logged to its console while it ran (errors,
@@ -2865,6 +2936,7 @@ function bindRecordingSetting(el, key, read) {
   el.addEventListener('change', () => {
     state[key] = read(el);
     chrome.storage.local.set({ [key]: state[key] });
+    if (key === 'recordSession' || key === 'recordMode') recordingDeclined = false;
     syncRecordingControls();
   });
 }
@@ -2872,10 +2944,13 @@ function syncRecordingControls() {
   const off = !state.recordSession;
   if (els.showCursorToggle) els.showCursorToggle.disabled = off;
   if (els.recordQuality) els.recordQuality.disabled = off;
+  if (els.recordMode) els.recordMode.disabled = off;
+  updateRecButton();
 }
 bindRecordingSetting(els.recordSessionToggle, 'recordSession', (el) => el.checked);
 bindRecordingSetting(els.showCursorToggle, 'showVirtualCursor', (el) => el.checked);
 bindRecordingSetting(els.recordQuality, 'recordQuality', (el) => el.value);
+bindRecordingSetting(els.recordMode, 'recordMode', (el) => el.value);
 
 els.confirmTools.addEventListener('change', () => {
   chrome.storage.local.set({ confirmTools: els.confirmTools.checked });
@@ -3120,6 +3195,7 @@ if (els.copilotCopyCodeBtn) {
     'recordSession',
     'showVirtualCursor',
     'recordQuality',
+    'recordMode',
     'resetChatOnTabSwitch',
     'catalogSourceMode',
     'catalogUrl',
@@ -3142,6 +3218,8 @@ if (els.copilotCopyCodeBtn) {
   state.recordQuality = stored.recordQuality || 'standard';
   if (els.recordSessionToggle) els.recordSessionToggle.checked = state.recordSession;
   if (els.showCursorToggle) els.showCursorToggle.checked = state.showVirtualCursor;
+  state.recordMode = stored.recordMode === 'session' ? 'session' : 'turn';
+  if (els.recordMode) els.recordMode.value = state.recordMode;
   if (els.recordQuality) els.recordQuality.value = state.recordQuality;
   syncRecordingControls();
   if (els.autoSuggestToggle) els.autoSuggestToggle.checked = state.autoSuggest;

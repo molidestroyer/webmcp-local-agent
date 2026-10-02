@@ -75,6 +75,9 @@
             <span id="chat-thread-domain" class="chat-header__domain"></span>
           </div>
           <div class="chat-header__side chat-header__side--end">
+            <button id="rec-btn" class="chat-header__btn rec-btn" type="button" hidden title="Start recording this session">
+              <span class="rec-btn__dot"></span><span id="rec-btn-label">Rec</span>
+            </button>
             <button id="chat-new-btn" class="chat-header__btn" type="button" title="Start a new chat thread for this page">
               ➕ New
             </button>
@@ -218,9 +221,21 @@
           <div class="setting-item__text">
             <span class="setting-item__title">Record a video while the agent works</span>
             <span class="setting-item__desc">
-              Off by default. Captures the active tab from the moment you send a message until the agent finishes, then saves a .webm to your Downloads folder (webmcp-agent/) with a .log of the same name: the page's console errors and a timeline of the tool calls. Nothing leaves your machine.
+              Off by default. Captures the active tab and, when it stops, saves a .webm to your Downloads folder (webmcp-agent/) with a .log of the same name: the page's console errors and a timeline of the tool calls. Nothing leaves your machine.
             </span>
           </div>
+        </label>
+        <label class="setting-item" title="When the recording stops">
+          <div class="setting-item__text">
+            <span class="setting-item__title">Recording mode</span>
+            <span class="setting-item__desc">
+              <strong>Per message</strong> records each message on its own and stops when the agent answers. <strong>Until I stop it</strong> starts with your first message and keeps going across messages and page navigations until you press the Rec button in the chat header: one video for a whole walkthrough.
+            </span>
+          </div>
+          <select id="record-mode">
+            <option value="turn">Per message</option>
+            <option value="session">Until I stop it</option>
+          </select>
         </label>
         <label class="setting-item" title="Draw a virtual cursor, click effects and a tool banner over the page">
           <input type="checkbox" id="show-cursor-toggle">
