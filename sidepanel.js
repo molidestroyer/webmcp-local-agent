@@ -2630,7 +2630,8 @@ async function stopPanelRecording() {
  * end of the turn (or forever, in session mode).
  */
 function captureEndedOnItsOwn(recorder) {
-  if (recorder !== panelRecorder || !sessionLive) return;
+  // Panel recordings pass their recorder; offscreen ones (REC_ENDED) pass null.
+  if (!sessionLive || (recorder ? recorder !== panelRecorder : panelRecorder)) return;
   console.log('[Rec] The captured tab stopped being shared; saving what was recorded.');
   showStatus('The recorded tab is no longer being captured (closed, or sharing stopped). The video so far is being saved.');
   logSession('internal', 'Capture ended by the browser (tab closed or sharing stopped).');
@@ -3337,6 +3338,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 chrome.runtime.onMessage.addListener((message) => {
   if (!message) return;
+  if (message.type === 'REC_ENDED') {
+    captureEndedOnItsOwn(null);
+    return;
+  }
   if (message.type === 'PAGE_LOG') {
     const entry = message.entry || {};
     if (message.tabId === (sessionLog && sessionLog.tabId)) {

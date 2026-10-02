@@ -11,7 +11,8 @@
 - **Grabación: cerrar la pestaña grabada o pulsar «Dejar de compartir» colgaba el botón Rec.**
   `MediaRecorder` se detiene solo cuando la captura termina, y `stop()` esperaba un `onstop` que
   ya había pasado: el vídeo no se guardaba nunca y el botón quedaba deshabilitado. Ahora se guarda
-  lo grabado en el momento, con aviso. Test nuevo (`tests/recorder.test.js`) que reproduce el cuelgue.
+  lo grabado en el momento, con aviso, tanto si graba el panel (selector de pestaña) como si graba
+  el documento offscreen (`tabCapture`, que avisa con `REC_ENDED`). Test nuevo (`tests/recorder.test.js`) que reproduce el cuelgue.
 - **Grabación: cambiar de pestaña** filma la original mientras el agente trabaja en la nueva.
   Se avisa una vez por cambio, en el panel y en el `.log`.
 - **Grabación: Rec y Enviar a la vez** abrían dos selectores de pestaña; ahora comparten un único arranque.

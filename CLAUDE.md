@@ -430,7 +430,8 @@ lines. Two things it is easy to get wrong:
   when the tab in front is not the filmed one (the agent follows the front tab, the video does
   not). `lib/recorder.js` must survive a capture that ends on its own (tab closed, "Stop
   sharing"): MediaRecorder stops by itself, and `stop()` waiting for a fresh `onstop` hung
-  forever with the Rec button disabled. `beginSessionCapture()` shares one in-flight start so
+  forever with the Rec button disabled. Both recorders report it: the panel's via `onEnded`, the
+  offscreen one by broadcasting `REC_ENDED`, which the panel hears directly. `beginSessionCapture()` shares one in-flight start so
   Rec and Send cannot open two pickers.
 
 - **Catalog for E2E** (0.7.12). The sample catalog leads with `chromelabs-hotel-chain`, for
