@@ -80,6 +80,7 @@ function bootHook({ modelContext = null, forms = [], readyState = 'loading', con
     TypeError,
     Error,
     SyntaxError,
+    AbortController,
   };
   context.globalThis = context;
   vm.createContext(context);
@@ -378,4 +379,86 @@ test('console capture reports uncaught errors, rejections and failed resources',
   assert.match(seen[0].text, /^Uncaught .*kaput[\s\S]*\(app\.js:7\)$/);
   assert.strictEqual(seen[1].text, 'Unhandled promise rejection: nope');
   assert.strictEqual(seen[2].text, 'Failed to load <img> https://x.test/a.png');
+});
+
+// --- Unregistering with an AbortSignal --------------------------------------
+
+test('a tool registered with { signal } disappears when the signal aborts, even without getTools()', async () => {
+  // A polyfill shaped like Google's use-webmcp-tool expects: registerTool only.
+  const hook = bootHook({ modelContext: { registerTool() {} } });
+  const first = new AbortController();
+  hook.documentShim.modelContext.registerTool({ name: 'start_booking', execute: () => 'ok' }, { signal: first.signal });
+  assert.deepStrictEqual(named((await hook.ask('list', null)).result), ['start_booking']);
+
+  // React re-registers: the old registration is aborted around the new one, in either order.
+  const second = new AbortController();
+  hook.documentShim.modelContext.registerTool({ name: 'start_booking', execute: () => 'ok' }, { signal: second.signal });
+  first.abort();
+  assert.deepStrictEqual(named((await hook.ask('list', null)).result), ['start_booking'], 'the newer registration survives');
+
+  // Route change: unmount aborts it for good.
+  second.abort();
+  assert.deepStrictEqual(named((await hook.ask('list', null)).result), []);
+
+  const gone = new AbortController();
+  gone.abort();
+  hook.documentShim.modelContext.registerTool({ name: 'late', execute: () => 'ok' }, { signal: gone.signal });
+  assert.deepStrictEqual(named((await hook.ask('list', null)).result), [], 'an already-aborted signal registers nothing');
+});
+
+// --- Declarative forms ------------------------------------------------------
+
+/** A field whose value lives behind a prototype setter, the way React's tracker sees it. */
+class TrackedInput {
+  constructor(name) { this._name = name; this._value = ''; this.type = 'text'; this.viaSetter = 0; }
+  getAttribute(attr) { return attr === 'name' ? this._name : null; }
+  get value() { return this._value; }
+  set value(v) { this._value = v; this.viaSetter++; }
+  dispatchEvent() { return true; }
+}
+
+function bookingForm({ autosubmit = null } = {}) {
+  const fields = [new TrackedInput('firstName'), new TrackedInput('email')];
+  const form = {
+    isConnected: true,
+    submits: 0,
+    fields,
+    getAttribute: (name) => (name === 'toolname' ? 'complete_booking' : name === 'toolautosubmit' ? autosubmit : null),
+    hasAttribute: (name) => name === 'toolautosubmit' && autosubmit !== null,
+    querySelectorAll: (selector) => (/input/.test(selector) ? fields : []),
+    querySelector: () => null,
+    requestSubmit() { this.submits++; this.isConnected = false; }, // the page swaps in a confirmation
+  };
+  return form;
+}
+
+test('a declarative form that waits for review is filled, not submitted, and says so', async () => {
+  const form = bookingForm();
+  const hook = bootHook({ forms: [form] });
+  const { result } = await hook.ask('execute', { name: 'complete_booking', args: { firstName: 'Carlos', email: 'c@x.test' } });
+  assert.strictEqual(form.submits, 0);
+  assert.strictEqual(result.submitted, false);
+  assert.match(result.message, /NOT submitted/);
+  // Through the prototype setter, so frameworks that track values see the change.
+  assert.strictEqual(form.fields[0].value, 'Carlos');
+  assert.strictEqual(form.fields[0].viaSetter, 1);
+});
+
+test('the E2E setting, or toolautosubmit, submits the form and reports what the page did', async () => {
+  const testing = bookingForm();
+  let hook = bootHook({ forms: [testing] });
+  let { result } = await hook.ask('execute', { name: 'complete_booking', args: { firstName: 'Carlos' }, submitForms: true }, 3000);
+  assert.strictEqual(testing.submits, 1);
+  assert.strictEqual(result.submitted, true);
+  assert.match(result.message, /replaced it/);
+
+  const declared = bookingForm({ autosubmit: '' });
+  hook = bootHook({ forms: [declared] });
+  ({ result } = await hook.ask('execute', { name: 'complete_booking', args: {} }, 3000));
+  assert.strictEqual(declared.submits, 1);
+
+  const reviewOnly = bookingForm({ autosubmit: 'false' });
+  hook = bootHook({ forms: [reviewOnly] });
+  ({ result } = await hook.ask('execute', { name: 'complete_booking', args: {} }, 3000));
+  assert.strictEqual(reviewOnly.submits, 0, 'toolautosubmit="false" means review, not submit');
 });

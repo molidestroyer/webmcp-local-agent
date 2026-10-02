@@ -404,6 +404,10 @@ lines. Two things it is easy to get wrong:
   time, max 4 cards, oldest finished evicted first. The goal line (`lib/agent-goal.js`) must stay
   free: it reads what the model already emitted and falls back to a label from the tool name.
   Never add a request, or a required field, just to feed it.
+  **Order (0.7.12):** model text → `wait` reason → this call's tool label (+ its key argument) →
+  the user's request. The request used to sit before the tool label and, being almost never empty,
+  made the label unreachable: a model that calls tools silently left the line frozen for the whole
+  run. It is announced **per call**, not once per reply.
 
 - **Fixed extension ID** (0.7.11). `manifest.json` carries a `key` (public half only), so the ID is
   always `jiadmihhccjnmohgemenocmifipigolh` whatever folder an unpacked copy is loaded from. Storage is per ID, and the
@@ -417,6 +421,45 @@ lines. Two things it is easy to get wrong:
   anyone testing the chat, who then reasonably concluded they did not exist. The virtual cursor stays
   recording-only (`setCursor`). The catalog prompt browser lists **all** rules (`browsePrompts()`), not
   just matching ones, and labels which apply; matching has one implementation, `ruleMatches()`.
+
+- **Recording vs threads, tabs and the browser** (0.7.12). Thread switching (New, open, delete
+  the current one) is refused while `state.busy`: the running turn keeps writing into
+  `state.messages` and its `finally` saves into whatever `currentSessionId` is by then, so the
+  rest of the run landed in the other thread. While idle, a *session* recording keeps going
+  across threads and the `.log` marks the switch. `checkRecordedTab()` warns once per switch
+  when the tab in front is not the filmed one (the agent follows the front tab, the video does
+  not). `lib/recorder.js` must survive a capture that ends on its own (tab closed, "Stop
+  sharing"): MediaRecorder stops by itself, and `stop()` waiting for a fresh `onstop` hung
+  forever with the Rec button disabled. Both recorders report it: the panel's via `onEnded`, the
+  offscreen one by broadcasting `REC_ENDED`, which the panel hears directly. `beginSessionCapture()` shares one in-flight start so
+  Rec and Send cannot open two pickers.
+
+- **Catalog for E2E** (0.7.12). The sample catalog leads with `chromelabs-hotel-chain`, for
+  Google's demo at `googlechromelabs.github.io/webmcp-tools/demos/hotel-chain`. Its
+  `systemContext` was written from that demo's source: the tools per page, the step order, the
+  price formula, and **what the site does not have** (room types, phone, terms checkbox,
+  confirmation code), so a full scripted prompt is reported honestly instead of invented. A
+  rule for a multi-page flow should match on `urlPattern` only: `requiredTools` would switch
+  its context off on every page but one. `demo/catalog-sample.json` and `DEMO_SAMPLE_CATALOG`
+  are the same data (a test enforces it). The prompt browser opens on 📍 *This page* (rules
+  that apply, or whose urlPattern names this URL) when there are any; the search takes
+  `/regex/` and also matches ids and urlPatterns.
+
+- **Declarative form execution** (0.7.12). `page-hook.js` fills `<form toolname>` itself (since
+  0.6.21, to avoid native `execute()` promises that never settle). Three rules found by the E2E run:
+  set fields through the **prototype setter** (`setFieldValue()`): a plain `el.value =` is invisible
+  to React and the page submits its old state. A form that is filled but not submitted must say
+  **NOT submitted** in its result, never a bare `success: true`, or the model reports the action
+  as done. It submits when `toolautosubmit` is present and not `"false"`, or when the user turned
+  on `state.submitForms` (E2E testing), which travels in the `execute` payload.
+
+- **`e2e/hotel-chain.js`** drives the real extension in headless Chromium (Playwright,
+  `channel: 'chromium'`; the headless shell cannot load extensions). The panel is opened as a
+  tab, so its init script points `chrome.tabs.query({ active, currentWindow })` at the demo tab
+  and records every `hud` message. Recording works headless with
+  `--auto-select-desktop-capture-source=<page title>`. Chromium has no native WebMCP, hence the
+  polyfill. Downloads vanish when the context closes, so copy them first. Run it after touching
+  the agent loop, page-hook execution, the overlay or recording.
 
 ## Running it
 

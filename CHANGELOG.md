@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.7.12
+
+- **Grabación: cambiar de hilo con el agente trabajando mezclaba conversaciones.** El turno en
+  curso seguía escribiendo en `state.messages` y al terminar guardaba en el hilo al que te habías
+  cambiado. Ahora *New*, abrir otro hilo o borrar el actual se rechazan mientras el agente
+  trabaja (con aviso). Sin turno en marcha, una grabación en modo *session* sigue a través de los
+  hilos y el `.log` marca cada cambio. Borrar el hilo actual estrena id, para que el siguiente
+  mensaje no lo resucite.
+- **Grabación: cerrar la pestaña grabada o pulsar «Dejar de compartir» colgaba el botón Rec.**
+  `MediaRecorder` se detiene solo cuando la captura termina, y `stop()` esperaba un `onstop` que
+  ya había pasado: el vídeo no se guardaba nunca y el botón quedaba deshabilitado. Ahora se guarda
+  lo grabado en el momento, con aviso, tanto si graba el panel (selector de pestaña) como si graba
+  el documento offscreen (`tabCapture`, que avisa con `REC_ENDED`). Test nuevo (`tests/recorder.test.js`) que reproduce el cuelgue.
+- **Grabación: cambiar de pestaña** filma la original mientras el agente trabaja en la nueva.
+  Se avisa una vez por cambio, en el panel y en el `.log`.
+- **Grabación: Rec y Enviar a la vez** abrían dos selectores de pestaña; ahora comparten un único arranque.
+- **La línea de objetivo cambia en cada paso.** La petición del usuario iba antes que el rótulo de
+  la tool y, como casi nunca está vacía, el rótulo no se usaba: con un modelo que llama tools sin
+  escribir texto (Copilot, modelos locales pequeños) la línea se quedaba fija toda la ejecución.
+  Orden nuevo: texto del modelo → motivo del `wait` → tool de esta llamada con su argumento clave
+  («Viewing hotel: champs...») → petición. Se anuncia por llamada, no por respuesta.
+- **Catálogo para E2E sobre la demo de Google** (`hotel-chain` de GoogleChromeLabs/webmcp-tools).
+  Regla `chromelabs-hotel-chain` por URL, con un contexto escrito a partir del código de la demo:
+  tools por página, orden del flujo, fórmula del precio (3 noches en Le Champs-Élysées = $1386) y
+  lo que la web **no** tiene (categoría de habitación, teléfono, casilla de términos, código de
+  confirmación), para que el modelo lo diga en vez de inventarlo. Incluye el prompt E2E completo y
+  otros más cortos. `demo/catalog-sample.json` y el catálogo integrado son ahora los mismos datos.
+- **Formularios declarativos: se anunciaba como hecho algo que no se había enviado.** Encontrado
+  con la prueba E2E sobre la demo de Google. Su `<form toolname="complete_booking">` no lleva
+  `toolautosubmit`, así que el hook solo lo rellenaba, pero contestaba `success: true` y el modelo
+  daba la reserva por hecha. Ahora el resultado dice «NOT submitted… do not report the action as
+  done». Nueva opción en *Settings → Agent Limits*, **Submit forms that wait for review (E2E
+  testing)**, desactivada por defecto, para que un flujo guionizado pueda terminar.
+  `toolautosubmit="false"` ya no se envía (antes bastaba con que el atributo existiera).
+- **Formularios declarativos: React no veía los valores.** Asignar `el.value` no actualiza el
+  estado de un input controlado. En la demo, la casilla mostraba «Carlos», pero la reserva habría
+  salido a nombre de la «Jane» que venía rellenada. Ahora se usa el setter nativo, como cuando se
+  escribe. Al enviar se usa `requestSubmit()` (no el primer `<button>` del formulario) y se informa
+  de si la página lo sustituyó o lo dejó en pantalla, con los campos inválidos.
+- **Tools desregistradas con `AbortSignal`.** La API actual (y `use-webmcp-tool` de Google)
+  desregistra con `registerTool(tool, { signal })` + `abort()`. En contextos nativos lo cubría
+  `getTools()`; con un polyfill sin `getTools()` la tool se quedaba para siempre.
+- **El `.log` de una sesión cuya pestaña se cerró llegaba tarde o no llegaba.** Esperaba a
+  desactivar la captura de consola en una pestaña que ya no existía.
+- **Prueba E2E en `e2e/`**: la extensión real en Chromium headless contra la demo `hotel-chain`
+  compilada en local y servida bajo su URL real, con un Ollama falso que sigue un guion y un
+  polyfill de `document.modelContext`. Comprueba el contexto del catálogo, la línea de objetivo
+  paso a paso, la desaparición de tools al navegar y el envío (o no) de la reserva. Con
+  `RECORD=1` graba de verdad (vídeo + `.log`); con `CHAOS=1` pulsa *New* a mitad de turno y
+  cierra la pestaña grabada. No forma parte de `node --test` ni del zip.
+- **Explorador de prompts: «look here».** Abre en 📍 *This page* (solo las reglas de la pestaña
+  delante, incluidas las que esperan a que aparezcan sus tools) si las hay; 🌐 *All* muestra todo.
+  El buscador admite `/regex/` y busca también en ids y `urlPattern`. Los prompts largos conservan
+  sus saltos de línea.
+
 ## 0.7.11
 
 - **ID de extensión fijo.** Sin `key` en el manifest, Chrome deriva el ID de la carpeta desde la

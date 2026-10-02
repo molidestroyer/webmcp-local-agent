@@ -10,7 +10,10 @@ const recorder = globalThis.__WebMCPRecorder.createRecorder();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.target !== 'offscreen') return undefined;
-  const work = message.type === 'REC_START' ? recorder.start(message)
+  // A capture can end on its own (tab closed, "Stop sharing"); the side panel hears this
+  // directly and saves the recording instead of leaving it "live" until Stop.
+  const onEnded = () => chrome.runtime.sendMessage({ type: 'REC_ENDED' }).catch(() => {});
+  const work = message.type === 'REC_START' ? recorder.start({ ...message, onEnded })
     : message.type === 'REC_STOP' ? recorder.stop()
       : null;
   if (!work) return undefined;

@@ -220,6 +220,15 @@
           </div>
           <input type="number" id="max-rounds-input" min="1" max="1000" step="1" value="100">
         </label>
+        <label class="setting-item" title="For end-to-end tests: submit &lt;form toolname&gt; forms that would otherwise wait for a person">
+          <input type="checkbox" id="submit-forms-toggle">
+          <div class="setting-item__text">
+            <span class="setting-item__title">Submit forms that wait for review (E2E testing)</span>
+            <span class="setting-item__desc">
+              A declarative form without <code>toolautosubmit</code> is only filled in, and a person is expected to submit it. Turn this on to let the agent submit it too, so a scripted flow can finish. Off by default: on a real site this sends the form without you seeing it first.
+            </span>
+          </div>
+        </label>
       </div>
 
       <!-- Group: Session recording -->
@@ -427,7 +436,8 @@
     </label>
     <div id="prompt-browser" class="prompt-browser" hidden role="dialog" aria-label="Catalog prompts">
       <div class="prompt-browser__head">
-        <input id="prompt-browser-search" type="search" placeholder="Search prompts or rules…" autocomplete="off">
+        <button id="prompt-browser-scope" class="scope-btn" type="button" aria-pressed="false" title="Show only the rules for the page in front">📍 This page</button>
+        <input id="prompt-browser-search" type="search" placeholder="Search, or /regex/…" autocomplete="off" title="Plain text matches rule names, ids, URL patterns and prompts. Write /pattern/ for a regular expression.">
         <button id="prompt-browser-close" class="icon-btn" type="button" title="Close"><span aria-hidden="true">✕</span><span class="sr-only">Close</span></button>
       </div>
       <div id="prompt-browser-list" class="prompt-browser__list"></div>

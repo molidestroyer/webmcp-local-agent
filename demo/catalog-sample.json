@@ -1,13 +1,30 @@
 {
   "version": "1.0",
-  "description": "WebMCP Business Rules & Prompt Catalog Sample for Multi-Country Address Book",
+  "description": "WebMCP Local Agent sample catalog: an end-to-end rule for Google's hotel-chain WebMCP demo, plus per-country business rules for the contacts demo.",
   "rules": [
+    {
+      "id": "chromelabs-hotel-chain",
+      "name": "Chrome Labs · Hotel chain (E2E)",
+      "match": {
+        "urlPattern": "googlechromelabs\\.github\\.io/webmcp-tools/demos/hotel-chain"
+      },
+      "systemContext": "Google Chrome Labs WebMCP hotel-chain demo (\"L'Atelier\"). Hash routes: #/ (home), #/search?q=<city>, #/hotel/<id>, #/book/<id>.\nTools by page: on EVERY page search_location(query, checkin_date YYYY-MM-DD, nights, adults, kids, pets), view_hotel(hotel_name_or_id) and lookup_amenity(hotel_id, amenity). On #/search also get_hotel_search_results(), filter_search_results(max_price, amenities[]) and reset_filters(). On #/hotel/<id> also start_booking(). On #/book/<id> the declarative form complete_booking(firstName, lastName, email).\nEnd-to-end order: search_location -> get_hotel_search_results -> view_hotel -> lookup_amenity (if the user asks about a service) -> start_booking -> complete_booking. Each step navigates; the next page's tools appear a moment later.\nDates: send checkin_date as YYYY-MM-DD and the stay as nights (check-out minus check-in). Guests: adults/kids/pets as numbers. The search, dates and guests carry over to the booking page.\nHotels in Paris: \"Le Champs-Élysées\" (id champs, $420/night, amenities spa, dining, wifi) and \"Montmartre Suites\" (id montmartre). Pass the id to view_hotel and lookup_amenity: a name only matches with its exact accents. Amenity values: gym, spa, dining, wifi, breakfast, rooftop bar, bar, laundry, late checkout, free parking, washer.\nWhat the site does NOT have: room categories (no Suite choice), meal plans or add-ons to select, a phone field, a terms/cancellation checkbox, and a confirmation number. lookup_amenity only shows information, it adds nothing to the booking. When the user asks for any of these, say plainly that the site does not offer it and carry on with the rest; never invent a value, a code or a tool.\nPrice: total = price per night x nights x 1.1 (10% taxes and fees), shown in USD. Le Champs-Élysées for 3 nights: $1260 + $126 = $1386.\ncomplete_booking is a form that waits for a person: unless the panel setting \"Submit forms that wait for review\" is on, it is only filled in and its result says NOT submitted. Then nothing is booked: say so and ask the user to press Confirm Reservation. Success: the complete_booking result says the form was submitted and the page replaced it (the page then shows \"Reservation Confirmed\"); a native browser may answer \"Reservation confirmed successfully.\" instead. If it says the form is still on the page, the booking was rejected: report the invalid fields. Report that, the hotel, the dates, the guests and the total; say that the site issues no confirmation code.",
+      "suggestedPrompts": [
+        "Actúa como mi asistente de viajes y completa el proceso de reserva en la web siguiendo este flujo paso a paso:\n\n1. Búsqueda y Selección de Hotel:\n   - Destino: París\n   - Fechas: Entrada el 16 de octubre de 2026 y salida el 19 de octubre de 2026 (3 noches)\n   - Huéspedes: 2 adultos\n   - Selecciona el hotel \"Le Champs-Élysées\".\n\n2. Inspección y Configuración de Habitación:\n   - Consulta los detalles y servicios de \"Le Champs-Élysées\".\n   - Elige una habitación de categoría \"Suite\".\n   - Asegúrate de incluir el régimen con desayuno y de añadir el extra/acceso a Spa si está disponible como opción.\n\n3. Formalización de la Reserva (Checkout):\n   - Rellena el formulario de reserva con estos datos:\n     * Nombre: Carlos\n     * Apellidos: Mendoza Ramos\n     * Email: carlos.mendoza.demo@example.com\n     * Teléfono: +34 612 345 678\n   - Acepta los términos y la política de cancelación.\n   - Envía el formulario para confirmar la reserva.\n\n4. Resultado Final:\n   - Muéstrame el resumen final que incluya el número o código de confirmación de la reserva y el precio total.",
+        "Book Le Champs-Élysées in Paris for 2 adults, check-in 2026-10-16, check-out 2026-10-19 (3 nights). Guest: Carlos Mendoza Ramos, carlos.mendoza.demo@example.com. Then give me the hotel, dates, guests and total price.",
+        "Search hotels in Paris for 2 adults from 2026-10-16 for 3 nights and list them with their price per night and amenities.",
+        "Show me the spa details of Le Champs-Élysées.",
+        "Filter the current results to hotels with spa under $500 per night and list them."
+      ]
+    },
     {
       "id": "contacts-za",
       "name": "South Africa Localization (ZA)",
       "match": {
         "urlPattern": ".*(\\.za|/za/|region=za).*",
-        "requiredTools": ["create_contact"]
+        "requiredTools": [
+          "create_contact"
+        ]
       },
       "systemContext": "ZA business rules: Only South African contacts (country='ZA') are permitted on this regional portal. Requires a 13-digit South African ID and 4-digit postal code.",
       "suggestedPrompts": [
@@ -20,7 +37,9 @@
       "name": "Spain Localization (ES)",
       "match": {
         "urlPattern": ".*(\\.es|/es/|region=es).*",
-        "requiredTools": ["create_contact"]
+        "requiredTools": [
+          "create_contact"
+        ]
       },
       "systemContext": "ES business rules: Only Spanish contacts (country='ES') are permitted on this regional portal. Requires a valid DNI/NIE/NIF document and a 5-digit Spanish postal code (CP).",
       "suggestedPrompts": [
@@ -33,7 +52,9 @@
       "name": "Canada Localization (CA)",
       "match": {
         "urlPattern": ".*(\\.ca|/ca/|region=ca).*",
-        "requiredTools": ["create_contact"]
+        "requiredTools": [
+          "create_contact"
+        ]
       },
       "systemContext": "CA business rules: Only Canadian contacts (country='CA') are permitted on this regional portal. Requires a Social Insurance Number (9-digit SIN) and an alphanumeric postal code (A1A 1A1).",
       "suggestedPrompts": [
