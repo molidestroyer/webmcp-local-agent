@@ -117,6 +117,11 @@ const els = {
   // settings
   autoSuggestToggle: document.getElementById('auto-suggest-toggle'),
   sendOnChipToggle: document.getElementById('send-on-chip-toggle'),
+  promptBrowser: document.getElementById('prompt-browser'),
+  promptBrowserSearch: document.getElementById('prompt-browser-search'),
+  promptBrowserList: document.getElementById('prompt-browser-list'),
+  promptBrowserClose: document.getElementById('prompt-browser-close'),
+  catalogBrowseBtn: document.getElementById('catalog-browse-btn'),
   resetChatOnTabToggle: document.getElementById('reset-chat-on-tab-toggle'),
   limitRoundsToggle: document.getElementById('limit-rounds-toggle'),
   maxRoundsInput: document.getElementById('max-rounds-input'),
@@ -209,7 +214,7 @@ const state = {
   limitRounds: true,
   maxToolSteps: DEFAULT_MAX_TOOL_STEPS,
   recordSession: false,
-  showVirtualCursor: false,
+  showVirtualCursor: true,
   recordQuality: 'standard',
   recordMode: 'turn', // 'turn' | 'session'
   overlayCorner: 'top-right',
@@ -551,7 +556,13 @@ function recentConversationSummary() {
  * cached catalog and its rules but still read "No Catalog Active · 0 rules
  * loaded". The catalog was working; only the card said otherwise.
  */
+/** Everything shown about the catalog is derived from state here, in one place. */
 function renderCatalogStatus() {
+  renderCatalogStatusBadge();
+  renderBrowseButton();
+}
+
+function renderCatalogStatusBadge() {
   if (!els.catalogStatusBadge || !els.catalogStatusMeta) return;
 
   const rules = state.catalogData && Array.isArray(state.catalogData.rules)
@@ -760,6 +771,85 @@ function useSuggestion(text, event) {
   els.input.focus();
   els.input.setSelectionRange(text.length, text.length);
   if (state.sendOnChipClick || (event && event.shiftKey)) sendMessage();
+}
+
+// --- Catalog prompt browser -------------------------------------------------------
+// The whole catalog, not just the rules that match this tab: the user chooses what to put
+// in the message box. Derived from state each time it renders; nothing is remembered here.
+
+function renderPromptBrowser() {
+  if (!els.promptBrowserList) return;
+  const groups = C ? C.browsePrompts(state.catalogData, {
+    url: state.tabUrl,
+    tools: state.tools,
+    query: els.promptBrowserSearch.value,
+  }) : [];
+  els.promptBrowserList.textContent = '';
+  if (!groups.length) {
+    const empty = document.createElement('div');
+    empty.className = 'prompt-browser__empty';
+    empty.textContent = els.promptBrowserSearch.value.trim()
+      ? 'Nothing in the catalog matches that search.'
+      : 'No prompts to show. Load a catalog in Settings → Knowledge & Prompt Catalog.';
+    els.promptBrowserList.appendChild(empty);
+    return;
+  }
+  for (const group of groups) {
+    const box = document.createElement('div');
+    box.className = 'prompt-group';
+    const title = document.createElement('div');
+    title.className = 'prompt-group__title';
+    const name = document.createElement('span');
+    name.textContent = group.name;
+    const badge = document.createElement('span');
+    badge.className = 'prompt-group__badge' + (group.matches ? ' prompt-group__badge--here' : '');
+    badge.textContent = group.matches ? 'this page' : 'other pages';
+    badge.title = group.matches
+      ? 'This rule applies to the current tab' + (group.hasContext ? ': its business rules travel with every message.' : '.')
+      : 'This rule does not apply to the current tab, so its business rules will not be sent with the prompt.';
+    title.append(name, badge);
+    box.appendChild(title);
+    for (const text of group.prompts) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'prompt-item';
+      item.textContent = text;
+      item.addEventListener('click', (event) => {
+        closePromptBrowser();
+        useSuggestion(text, event);
+      });
+      box.appendChild(item);
+    }
+    els.promptBrowserList.appendChild(box);
+  }
+}
+
+function openPromptBrowser() {
+  els.promptBrowser.hidden = false;
+  els.promptBrowserSearch.value = '';
+  renderPromptBrowser();
+  els.promptBrowserSearch.focus();
+}
+
+function closePromptBrowser() {
+  els.promptBrowser.hidden = true;
+}
+
+/** The button exists only when there is something to browse. */
+function renderBrowseButton() {
+  if (!els.catalogBrowseBtn) return;
+  const has = Boolean(C && C.browsePrompts(state.catalogData).length);
+  els.catalogBrowseBtn.hidden = !has;
+  if (!has && els.promptBrowser) els.promptBrowser.hidden = true;
+}
+
+if (els.catalogBrowseBtn) {
+  els.catalogBrowseBtn.addEventListener('click', () => (els.promptBrowser.hidden ? openPromptBrowser() : closePromptBrowser()));
+  els.promptBrowserClose.addEventListener('click', closePromptBrowser);
+  els.promptBrowserSearch.addEventListener('input', renderPromptBrowser);
+  els.promptBrowser.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { closePromptBrowser(); els.input.focus(); }
+  });
 }
 
 function chipHint() {
@@ -2011,7 +2101,7 @@ async function runToolCall(call) {
 
   // Every way a call can end (page tool, built-in wait, unknown tool, user cancel) is
   // traced here, so the session log and the on-page banner see all of them alike.
-  const hudId = sessionLive && state.showVirtualCursor ? ++hudSeq : 0;
+  const hudId = state.showVirtualCursor ? ++hudSeq : 0;
   const trace = ({ ok, output, ms, note }) => {
     const entry = SL.toolEntry({ name: String(name || '(unnamed)'), args, ok, output, ms, note });
     logSession('tool', entry.text, undefined, entry.detail);
@@ -2093,7 +2183,7 @@ function announceGoal(text) {
   if (text === currentGoal) return;
   currentGoal = text;
   if (text) logSession('goal', text);
-  if (sessionLive && state.showVirtualCursor) bridge('hud', { phase: 'goal', text, corner: state.overlayCorner });
+  if (state.showVirtualCursor) bridge('hud', { phase: 'goal', text, corner: state.overlayCorner });
 }
 
 function goalForReply(reply) {
@@ -3074,15 +3164,15 @@ function bindRecordingSetting(el, key, read) {
     state[key] = read(el);
     chrome.storage.local.set({ [key]: state[key] });
     if (key === 'recordSession' || key === 'recordMode') recordingDeclined = false;
+    if (key === 'showVirtualCursor' && !state.showVirtualCursor) bridge('hud', { phase: 'goal', text: '' });
     syncRecordingControls();
   });
 }
 function syncRecordingControls() {
   const off = !state.recordSession;
-  if (els.showCursorToggle) els.showCursorToggle.disabled = off;
   if (els.recordQuality) els.recordQuality.disabled = off;
   if (els.recordMode) els.recordMode.disabled = off;
-  if (els.overlayCorner) els.overlayCorner.disabled = off || !state.showVirtualCursor;
+  if (els.overlayCorner) els.overlayCorner.disabled = !state.showVirtualCursor;
   updateRecButton();
 }
 bindRecordingSetting(els.recordSessionToggle, 'recordSession', (el) => el.checked);
@@ -3355,7 +3445,8 @@ if (els.copilotCopyCodeBtn) {
   if (els.maxRoundsInput) els.maxRoundsInput.value = state.maxToolSteps;
   syncLimitControls();
   state.recordSession = Boolean(stored.recordSession);
-  state.showVirtualCursor = Boolean(stored.showVirtualCursor);
+  // On unless the user turned it off: it is useful live, not only when recording.
+  state.showVirtualCursor = stored.showVirtualCursor !== false;
   state.recordQuality = stored.recordQuality || 'standard';
   if (els.recordSessionToggle) els.recordSessionToggle.checked = state.recordSession;
   if (els.showCursorToggle) els.showCursorToggle.checked = state.showVirtualCursor;

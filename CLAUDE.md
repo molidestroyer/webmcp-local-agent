@@ -409,6 +409,12 @@ lines. Two things it is easy to get wrong:
   The private key was not kept; only the public key is needed to load unpacked. If the extension is
   ever published on the Chrome Web Store, check how it treats a manifest `key` first.
 
+- **Overlay vs recording** (0.7.11). The tool cards and goal line depend only on
+  `state.showVirtualCursor`, never on `sessionLive`: tying them to a recording made them invisible to
+  anyone testing the chat, who then reasonably concluded they did not exist. The virtual cursor stays
+  recording-only (`setCursor`). The catalog prompt browser lists **all** rules (`browsePrompts()`), not
+  just matching ones, and labels which apply; matching has one implementation, `ruleMatches()`.
+
 ## Running it
 
 ```bash
