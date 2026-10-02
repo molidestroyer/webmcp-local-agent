@@ -2,7 +2,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 const C = require('../lib/catalog-service.js');
+
+const byId = (id) => C.DEMO_SAMPLE_CATALOG.rules.find((r) => r.id === id);
+const HOTEL = 'https://googlechromelabs.github.io/webmcp-tools/demos/hotel-chain/#/book/champs';
 
 test('validates correct catalog schema', () => {
   const result = C.validateCatalogSchema(C.DEMO_SAMPLE_CATALOG);
@@ -86,14 +91,14 @@ test('browsing lists every rule, the ones for this page first', () => {
     url: 'https://x.test/app?region=es',
     tools: [{ name: 'create_contact' }],
   });
-  assert.deepStrictEqual(groups.map((g) => g.id), ['contacts-es', 'contacts-za', 'contacts-ca']);
-  assert.deepStrictEqual(groups.map((g) => g.matches), [true, false, false]);
+  assert.deepStrictEqual(groups.map((g) => g.id), ['contacts-es', 'chromelabs-hotel-chain', 'contacts-za', 'contacts-ca']);
+  assert.deepStrictEqual(groups.map((g) => g.matches), [true, false, false, false]);
   assert.ok(groups[0].prompts.length > 0 && groups[0].hasContext);
 });
 
 test('browsing without a matching page still offers everything', () => {
   const groups = C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { url: 'https://other.test/', tools: [] });
-  assert.strictEqual(groups.length, 3);
+  assert.strictEqual(groups.length, C.DEMO_SAMPLE_CATALOG.rules.length);
   assert.ok(groups.every((g) => g.matches === false));
 });
 
@@ -103,7 +108,7 @@ test('browsing filters by prompt text, or by rule name keeping all its prompts',
   assert.ok(byText[0].prompts.every((p) => /dni/i.test(p)));
   const byRule = C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { query: 'canada' });
   assert.deepStrictEqual(byRule.map((g) => g.id), ['contacts-ca']);
-  assert.strictEqual(byRule[0].prompts.length, C.DEMO_SAMPLE_CATALOG.rules[2].suggestedPrompts.length);
+  assert.strictEqual(byRule[0].prompts.length, byId('contacts-ca').suggestedPrompts.length);
   assert.deepStrictEqual(C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { query: 'zzz-nothing' }), []);
 });
 
@@ -116,8 +121,48 @@ test('browsing skips unusable entries and handles an empty or missing catalog', 
 });
 
 test('ruleMatches agrees with resolveContext', () => {
-  const rule = C.DEMO_SAMPLE_CATALOG.rules[1];
+  const rule = byId('contacts-es');
   assert.strictEqual(C.ruleMatches(rule, 'https://x.test/?region=es', ['create_contact']), true);
   assert.strictEqual(C.ruleMatches(rule, 'https://x.test/?region=es', []), false);
   assert.strictEqual(C.ruleMatches({ id: 'x', name: 'x' }, 'https://x.test/', []), false);
+});
+
+test('the built-in sample and demo/catalog-sample.json are the same data', () => {
+  const file = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'demo', 'catalog-sample.json'), 'utf8'));
+  assert.deepStrictEqual(file, C.DEMO_SAMPLE_CATALOG);
+});
+
+test('the hotel-chain rule applies on every page of that demo, whatever tools are up', () => {
+  const rule = byId('chromelabs-hotel-chain');
+  for (const route of ['#/', '#/search?q=paris', '#/hotel/champs', '#/book/champs']) {
+    const url = 'https://googlechromelabs.github.io/webmcp-tools/demos/hotel-chain/' + route;
+    assert.strictEqual(C.ruleMatches(rule, url, ['search_location']), true, route);
+  }
+  assert.strictEqual(C.ruleMatches(rule, 'https://googlechromelabs.github.io/webmcp-tools/demos/other/', []), false);
+  const res = C.resolveContext(HOTEL, [{ name: 'complete_booking' }], C.DEMO_SAMPLE_CATALOG);
+  assert.deepStrictEqual(res.matchedRules.map((r) => r.id), ['chromelabs-hotel-chain']);
+  // What an E2E run needs to stay honest: the real tools, and what the site does not have.
+  for (const needle of ['search_location', 'complete_booking', 'start_booking', 'confirmation number', '$1386']) {
+    assert.ok(res.systemContext.includes(needle), needle);
+  }
+});
+
+test("scope 'page' keeps only this site's rules, including ones still waiting for their tools", () => {
+  const onHotel = C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { url: HOTEL, tools: [], scope: 'page' });
+  assert.deepStrictEqual(onHotel.map((g) => g.id), ['chromelabs-hotel-chain']);
+  assert.strictEqual(onHotel[0].here, true);
+  const esNoTools = C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { url: 'https://x.test/?region=es', tools: [], scope: 'page' });
+  assert.deepStrictEqual(esNoTools.map((g) => [g.id, g.matches, g.here]), [['contacts-es', false, true]]);
+  assert.deepStrictEqual(C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { url: 'https://other.test/', scope: 'page' }), []);
+});
+
+test('the search takes /regex/ and also matches the urlPattern', () => {
+  assert.deepStrictEqual(C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { query: '/^contacts-(es|ca)$/' }).map((g) => g.id), ['contacts-es', 'contacts-ca']);
+  assert.deepStrictEqual(C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { query: 'hotel-chain' }).map((g) => g.id), ['chromelabs-hotel-chain']);
+  const byPrompt = C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { query: '/spa\\b/' });
+  assert.deepStrictEqual(byPrompt.map((g) => g.id), ['chromelabs-hotel-chain']);
+  assert.ok(byPrompt[0].prompts.every((p) => /spa\b/i.test(p)));
+  assert.ok(C.parseQuery('/(/').error);
+  assert.deepStrictEqual(C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { query: '/(/' }), []);
+  assert.strictEqual(C.parseQuery('plain').error, null);
 });

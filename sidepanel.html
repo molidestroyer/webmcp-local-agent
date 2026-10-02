@@ -427,7 +427,8 @@
     </label>
     <div id="prompt-browser" class="prompt-browser" hidden role="dialog" aria-label="Catalog prompts">
       <div class="prompt-browser__head">
-        <input id="prompt-browser-search" type="search" placeholder="Search prompts or rules…" autocomplete="off">
+        <button id="prompt-browser-scope" class="scope-btn" type="button" aria-pressed="false" title="Show only the rules for the page in front">📍 This page</button>
+        <input id="prompt-browser-search" type="search" placeholder="Search, or /regex/…" autocomplete="off" title="Plain text matches rule names, ids, URL patterns and prompts. Write /pattern/ for a regular expression.">
         <button id="prompt-browser-close" class="icon-btn" type="button" title="Close"><span aria-hidden="true">✕</span><span class="sr-only">Close</span></button>
       </div>
       <div id="prompt-browser-list" class="prompt-browser__list"></div>

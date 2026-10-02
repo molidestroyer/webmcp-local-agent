@@ -49,21 +49,45 @@ test('model text has only a safety cap, cut at a word, and still ignores non-pro
   assert.strictEqual(G.goalFromModel(''), '');
 });
 
-test('pickGoal: the model first, then the wait reason, then the request, then the tool', () => {
+test('pickGoal: the model first, then the wait reason, then this step\'s tool, then the request', () => {
   const base = { toolName: 'complete_booking', previousTool: 'search_hotels', request: 'Book a hotel in Barcelona for three nights. Pay by card.' };
   assert.strictEqual(pick({ ...base, content: 'Filling in the guest details now.' }), 'Filling in the guest details now.');
   // Reasoning is a fallback and stays a short first sentence; the visible text wins over it.
   assert.strictEqual(pick({ ...base, thinking: 'The form needs a surname before it can be submitted. More.' }), 'The form needs a surname before it can be submitted');
   assert.strictEqual(pick({ ...base, thinking: 'Reasoning text.', content: 'Visible reason.' }), 'Visible reason.');
-  // No words from the model: the request, not an echo of the tool card.
-  assert.strictEqual(pick(base), 'Book a hotel in Barcelona for three nights');
-  assert.notStrictEqual(pick(base), G.goalFromTool('complete_booking'));
+  // No words from the model: the step, not the request (which never changes during a run).
+  assert.strictEqual(pick(base), 'Completing booking...');
   assert.strictEqual(
     pick({ ...base, toolName: 'wait', toolArgs: { seconds: 10 } }),
     'Waiting 10s for the page to update after search hotels...',
   );
-  // No request either: the tool label is the last resort.
-  assert.strictEqual(pick({ toolName: 'complete_booking' }), 'Completing booking...');
+  // No tool name at all: the request is the last resort.
+  assert.strictEqual(pick({ request: base.request }), 'Book a hotel in Barcelona for three nights');
+});
+
+test('a silent multi-step run changes the line on every step', () => {
+  const request = 'Book Le Champs-Elysees in Paris for 2 adults.';
+  const steps = [
+    ['search_location', { query: 'Paris', adults: 2 }],
+    ['view_hotel', { hotel_name_or_id: 'champs' }],
+    ['start_booking', {}],
+    ['complete_booking', { firstName: 'Carlos', lastName: 'Mendoza Ramos' }],
+  ].map(([toolName, toolArgs]) => pick({ toolName, toolArgs, request }));
+  assert.deepStrictEqual(steps, [
+    'Searching location: Paris...',
+    'Viewing hotel: champs...',
+    'Starting booking...',
+    'Completing booking: Carlos...',
+  ]);
+});
+
+test('the key argument skips secrets, free text and long values', () => {
+  assert.strictEqual(G.salientArg({ password: 'hunter2', user: 'ana' }), 'ana');
+  assert.strictEqual(G.salientArg({ description: 'a long note', id: 'x1' }), 'x1');
+  assert.strictEqual(G.salientArg({ text: 'y'.repeat(80) }), '');
+  assert.strictEqual(G.salientArg({ n: 3 }), '');
+  assert.strictEqual(G.salientArg(null), '');
+  assert.strictEqual(G.goalFromTool('wait', { seconds: '5' }), 'Waiting for the page...');
 });
 
 function pick(input) { return G.pickGoal(input); }

@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.7.12
+
+- **Grabación: cambiar de hilo con el agente trabajando mezclaba conversaciones.** El turno en
+  curso seguía escribiendo en `state.messages` y al terminar guardaba en el hilo al que te habías
+  cambiado. Ahora *New*, abrir otro hilo o borrar el actual se rechazan mientras el agente
+  trabaja (con aviso). Sin turno en marcha, una grabación en modo *session* sigue a través de los
+  hilos y el `.log` marca cada cambio. Borrar el hilo actual estrena id, para que el siguiente
+  mensaje no lo resucite.
+- **Grabación: cerrar la pestaña grabada o pulsar «Dejar de compartir» colgaba el botón Rec.**
+  `MediaRecorder` se detiene solo cuando la captura termina, y `stop()` esperaba un `onstop` que
+  ya había pasado: el vídeo no se guardaba nunca y el botón quedaba deshabilitado. Ahora se guarda
+  lo grabado en el momento, con aviso. Test nuevo (`tests/recorder.test.js`) que reproduce el cuelgue.
+- **Grabación: cambiar de pestaña** filma la original mientras el agente trabaja en la nueva.
+  Se avisa una vez por cambio, en el panel y en el `.log`.
+- **Grabación: Rec y Enviar a la vez** abrían dos selectores de pestaña; ahora comparten un único arranque.
+- **La línea de objetivo cambia en cada paso.** La petición del usuario iba antes que el rótulo de
+  la tool y, como casi nunca está vacía, el rótulo no se usaba: con un modelo que llama tools sin
+  escribir texto (Copilot, modelos locales pequeños) la línea se quedaba fija toda la ejecución.
+  Orden nuevo: texto del modelo → motivo del `wait` → tool de esta llamada con su argumento clave
+  («Viewing hotel: champs...») → petición. Se anuncia por llamada, no por respuesta.
+- **Catálogo para E2E sobre la demo de Google** (`hotel-chain` de GoogleChromeLabs/webmcp-tools).
+  Regla `chromelabs-hotel-chain` por URL, con un contexto escrito a partir del código de la demo:
+  tools por página, orden del flujo, fórmula del precio (3 noches en Le Champs-Élysées = $1386) y
+  lo que la web **no** tiene (categoría de habitación, teléfono, casilla de términos, código de
+  confirmación), para que el modelo lo diga en vez de inventarlo. Incluye el prompt E2E completo y
+  otros más cortos. `demo/catalog-sample.json` y el catálogo integrado son ahora los mismos datos.
+- **Explorador de prompts: «look here».** Abre en 📍 *This page* (solo las reglas de la pestaña
+  delante, incluidas las que esperan a que aparezcan sus tools) si las hay; 🌐 *All* muestra todo.
+  El buscador admite `/regex/` y busca también en ids y `urlPattern`. Los prompts largos conservan
+  sus saltos de línea.
+
 ## 0.7.11
 
 - **ID de extensión fijo.** Sin `key` en el manifest, Chrome deriva el ID de la carpeta desde la

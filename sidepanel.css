@@ -938,8 +938,11 @@ body {
 }
 
 .chip-suggestion {
-  display: inline-flex;
-  align-items: center;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   padding: 4px 10px;
   border: 1px solid var(--accent-soft);
   border-radius: 999px;
@@ -1331,5 +1334,12 @@ body {
 .prompt-item { text-align: left; font: inherit; font-size: 12px; line-height: 1.35; padding: 6px 8px; cursor: pointer;
   border: 1px solid var(--border); border-radius: 6px; background: #10101c; color: var(--text); }
 .prompt-item:hover { border-color: var(--accent); background: var(--accent-soft); }
+/* E2E prompts are whole scripts: keep their lines, show the start, the full text is in the title. */
+.prompt-item { white-space: pre-line; flex: 0 0 auto; }
+.prompt-browser__scope-note { font-size: 10px; color: var(--text-dim); }
+.prompt-browser__error { color: #fca5a5; }
+.scope-btn { flex: 0 0 auto; font: inherit; font-size: 11px; padding: 4px 8px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); background: transparent; color: var(--text-dim); white-space: nowrap; }
+.scope-btn[aria-pressed="true"] { border-color: #3b82f6; color: #93c5fd; background: rgba(59, 130, 246, 0.12); }
 .prompt-browser__empty { font-size: 12px; color: var(--text-dim); padding: 6px 2px; }
 .prompt-browser__foot { font-size: 10px; color: var(--text-dim); }

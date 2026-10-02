@@ -120,6 +120,7 @@ const els = {
   sendOnChipToggle: document.getElementById('send-on-chip-toggle'),
   promptBrowser: document.getElementById('prompt-browser'),
   promptBrowserSearch: document.getElementById('prompt-browser-search'),
+  promptBrowserScope: document.getElementById('prompt-browser-scope'),
   promptBrowserList: document.getElementById('prompt-browser-list'),
   promptBrowserClose: document.getElementById('prompt-browser-close'),
   catalogBrowseBtn: document.getElementById('catalog-browse-btn'),
@@ -778,20 +779,47 @@ function useSuggestion(text, event) {
 // The whole catalog, not just the rules that match this tab: the user chooses what to put
 // in the message box. Derived from state each time it renders; nothing is remembered here.
 
+// 'page' shows only the rules for the tab in front ("look here"), 'all' the whole catalog.
+let promptScope = 'all';
+
+function hostOf(url) {
+  try { return new URL(url).hostname; } catch (_) { return ''; }
+}
+
 function renderPromptBrowser() {
   if (!els.promptBrowserList) return;
+  const query = els.promptBrowserSearch.value;
+  const parsed = C ? C.parseQuery(query) : { error: null };
   const groups = C ? C.browsePrompts(state.catalogData, {
     url: state.tabUrl,
     tools: state.tools,
-    query: els.promptBrowserSearch.value,
+    query,
+    scope: promptScope,
   }) : [];
+  if (els.promptBrowserScope) {
+    const host = hostOf(state.tabUrl);
+    els.promptBrowserScope.setAttribute('aria-pressed', String(promptScope === 'page'));
+    els.promptBrowserScope.textContent = promptScope === 'page' ? '📍 This page' : '🌐 All';
+    els.promptBrowserScope.title = promptScope === 'page'
+      ? `Showing only the rules for ${host || 'this page'}. Click to show the whole catalog.`
+      : `Showing the whole catalog. Click to show only the rules for ${host || 'this page'}.`;
+  }
   els.promptBrowserList.textContent = '';
   if (!groups.length) {
     const empty = document.createElement('div');
     empty.className = 'prompt-browser__empty';
-    empty.textContent = els.promptBrowserSearch.value.trim()
-      ? 'Nothing in the catalog matches that search.'
-      : 'No prompts to show. Load a catalog in Settings → Knowledge & Prompt Catalog.';
+    if (parsed.error) {
+      empty.classList.add('prompt-browser__error');
+      empty.textContent = parsed.error;
+    } else if (query.trim()) {
+      empty.textContent = promptScope === 'page'
+        ? 'Nothing for this page matches that search. Switch to 🌐 All to search the whole catalog.'
+        : 'Nothing in the catalog matches that search.';
+    } else if (promptScope === 'page') {
+      empty.textContent = `No catalog rule targets ${hostOf(state.tabUrl) || 'this page'}. Switch to 🌐 All to browse everything, or add a rule whose urlPattern matches this URL.`;
+    } else {
+      empty.textContent = 'No prompts to show. Load a catalog in Settings → Knowledge & Prompt Catalog.';
+    }
     els.promptBrowserList.appendChild(empty);
     return;
   }
@@ -803,18 +831,22 @@ function renderPromptBrowser() {
     const name = document.createElement('span');
     name.textContent = group.name;
     const badge = document.createElement('span');
-    badge.className = 'prompt-group__badge' + (group.matches ? ' prompt-group__badge--here' : '');
-    badge.textContent = group.matches ? 'this page' : 'other pages';
-    badge.title = group.matches
+    const kind = group.matches ? 'here' : group.here ? 'site' : 'other';
+    badge.className = 'prompt-group__badge' + (kind === 'other' ? '' : ' prompt-group__badge--here');
+    badge.textContent = kind === 'here' ? 'this page' : kind === 'site' ? 'this site' : 'other pages';
+    badge.title = kind === 'here'
       ? 'This rule applies to the current tab' + (group.hasContext ? ': its business rules travel with every message.' : '.')
-      : 'This rule does not apply to the current tab, so its business rules will not be sent with the prompt.';
+      : kind === 'site'
+        ? 'This rule targets this URL but waits for tools the page has not registered yet; its business rules are sent once they appear.'
+        : 'This rule does not apply to the current tab, so its business rules will not be sent with the prompt.';
     title.append(name, badge);
     box.appendChild(title);
     for (const text of group.prompts) {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'prompt-item';
-      item.textContent = text;
+      item.textContent = previewLines(text, 6);
+      item.title = text;
       item.addEventListener('click', (event) => {
         closePromptBrowser();
         useSuggestion(text, event);
@@ -825,9 +857,18 @@ function renderPromptBrowser() {
   }
 }
 
+/** The first `max` non-empty lines, so a long E2E script stays one readable card. */
+function previewLines(text, max) {
+  const lines = String(text).split('\n').filter((l) => l.trim());
+  return lines.length > max ? lines.slice(0, max).join('\n') + '\n…' : lines.join('\n');
+}
+
 function openPromptBrowser() {
   els.promptBrowser.hidden = false;
   els.promptBrowserSearch.value = '';
+  // Look here first: when the catalog has rules for this page, start with only those.
+  const forPage = C ? C.browsePrompts(state.catalogData, { url: state.tabUrl, tools: state.tools, scope: 'page' }) : [];
+  promptScope = forPage.length ? 'page' : 'all';
   renderPromptBrowser();
   els.promptBrowserSearch.focus();
 }
@@ -848,9 +889,31 @@ if (els.catalogBrowseBtn) {
   els.catalogBrowseBtn.addEventListener('click', () => (els.promptBrowser.hidden ? openPromptBrowser() : closePromptBrowser()));
   els.promptBrowserClose.addEventListener('click', closePromptBrowser);
   els.promptBrowserSearch.addEventListener('input', renderPromptBrowser);
+  if (els.promptBrowserScope) {
+    els.promptBrowserScope.addEventListener('click', () => {
+      promptScope = promptScope === 'page' ? 'all' : 'page';
+      renderPromptBrowser();
+      els.promptBrowserSearch.focus();
+    });
+  }
   els.promptBrowser.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') { closePromptBrowser(); els.input.focus(); }
   });
+}
+
+/**
+ * A catalog prompt can be a whole E2E script. The chip shows its first line on one line (the
+ * CSS ellipsizes it); the full text is in the tooltip and goes to the message box on click.
+ */
+function chipLabel(text) {
+  return String(text).split('\n').map((l) => l.trim()).find(Boolean) || String(text);
+}
+
+function chipTitle(text) {
+  const full = String(text);
+  return full === chipLabel(full) && full.length <= 120
+    ? chipHint()
+    : (full.length > 600 ? full.slice(0, 600) + '…' : full) + '\n\n' + chipHint();
 }
 
 function chipHint() {
@@ -888,8 +951,8 @@ function renderSuggestions() {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'chip-suggestion chip-suggestion--static';
-      chip.textContent = '📌 ' + text;
-      chip.title = chipHint();
+      chip.textContent = '📌 ' + chipLabel(text);
+      chip.title = chipTitle(text);
       chip.addEventListener('click', (event) => useSuggestion(text, event));
       els.suggestionsChips.appendChild(chip);
     }
@@ -901,8 +964,8 @@ function renderSuggestions() {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'chip-suggestion chip-suggestion--ai';
-      chip.textContent = '✨ ' + text;
-      chip.title = chipHint();
+      chip.textContent = '✨ ' + chipLabel(text);
+      chip.title = chipTitle(text);
       chip.addEventListener('click', (event) => useSuggestion(text, event));
       els.suggestionsChips.appendChild(chip);
     }
@@ -1095,6 +1158,9 @@ async function detectPageTools() {
     renderToolsList();
     renderPicker();
     announceTabChangeIfNeeded();
+    checkRecordedTab();
+    // An open prompt browser follows the tab in front: "this page" means this one.
+    if (els.promptBrowser && !els.promptBrowser.hidden) renderPromptBrowser();
 
     // If NO tools detected on active page -> clear and hide suggestions completely!
     if (!state.tools || state.tools.length === 0) {
@@ -2187,13 +2253,14 @@ function announceGoal(text) {
   if (state.showVirtualCursor) bridge('hud', { phase: 'goal', text, corner: state.overlayCorner });
 }
 
-function goalForReply(reply, request, previousTool) {
-  const first = reply.tool_calls && reply.tool_calls[0] && reply.tool_calls[0].function;
+/** The goal for one call of a reply: every call gets its own, so the line follows the steps. */
+function goalForCall(reply, call, request, previousTool) {
+  const fn = (call && call.function) || {};
   return Goal.pickGoal({
     thinking: reply.thinking,
     content: reply.content,
-    toolName: first && first.name,
-    toolArgs: first && parseArguments(first.arguments),
+    toolName: fn.name,
+    toolArgs: parseArguments(fn.arguments),
     previousTool,
     request,
   });
@@ -2240,9 +2307,17 @@ async function copilotChat(messages, tools, onChunk) {
  * A failure to record is reported but never blocks the agent.
  */
 let recordingDeclined = false; // the user cancelled the picker; do not ask again every message
+let captureStarting = null; // the start in flight, so Rec and Send cannot open two pickers
 
-async function beginSessionCapture() {
-  if (sessionLive) return true;
+function beginSessionCapture() {
+  if (sessionLive) return Promise.resolve(true);
+  if (!captureStarting) {
+    captureStarting = startSessionCapture().finally(() => { captureStarting = null; });
+  }
+  return captureStarting;
+}
+
+async function startSessionCapture() {
   // Re-grant folder access now, while the click that got us here still counts as a gesture.
   await resolveRecordingsDir().catch(() => null);
   const started = await startSessionRecording();
@@ -2333,6 +2408,25 @@ let sessionStem = null;
 const SL = globalThis.__WebMCPSessionLog;
 const Goal = globalThis.__WebMCPAgentGoal;
 
+/**
+ * The video films one tab, chosen when the recording started, but the agent always works on
+ * the tab in front. Switching tabs mid-recording therefore films the wrong one: say so once
+ * per switch, in the panel and in the .log, instead of producing a video of nothing.
+ */
+let offRecordedTab = null;
+function checkRecordedTab() {
+  if (!sessionLive || !sessionLog) { offRecordedTab = null; return; }
+  if (state.tabId === sessionLog.tabId) {
+    if (offRecordedTab != null) logSession('internal', 'Back on the recorded tab.');
+    offRecordedTab = null;
+    return;
+  }
+  if (offRecordedTab === state.tabId) return;
+  offRecordedTab = state.tabId;
+  logSession('internal', 'Active tab changed to ' + (state.tabUrl || 'another tab') + '; the video keeps filming the recorded tab.');
+  showStatus('The recording keeps filming the tab it started on, but the agent now works on this one. Go back to that tab, or stop and start the recording again.');
+}
+
 /** `detail` is an indented block under the line (a tool's result or error). */
 function logSession(kind, text, t, detail) {
   if (!sessionLog) return;
@@ -2419,7 +2513,13 @@ async function startSessionRecording() {
     const recorder = R.createRecorder();
     try {
       console.log('[Rec] Recording in the side panel (source=desktop, id length=' + streamId.length + ').');
-      await recorder.start({ streamId, source: 'desktop', fps: preset.fps, bitrate: preset.bitrate });
+      await recorder.start({
+        streamId,
+        source: 'desktop',
+        fps: preset.fps,
+        bitrate: preset.bitrate,
+        onEnded: () => captureEndedOnItsOwn(recorder),
+      });
     } catch (err) {
       console.warn('[Rec] ' + String((err && err.message) || err));
       showStatus('Could not record the session: ' + String((err && err.message) || err));
@@ -2522,6 +2622,19 @@ async function stopPanelRecording() {
   } catch (err) {
     showStatus('Could not save the recording: ' + String((err && err.message) || err));
   }
+}
+
+/**
+ * The recorded tab was closed or the user pressed Chrome's "Stop sharing". Nothing more can
+ * be filmed, so save what there is now instead of leaving a dead recording "live" until the
+ * end of the turn (or forever, in session mode).
+ */
+function captureEndedOnItsOwn(recorder) {
+  if (recorder !== panelRecorder || !sessionLive) return;
+  console.log('[Rec] The captured tab stopped being shared; saving what was recorded.');
+  showStatus('The recorded tab is no longer being captured (closed, or sharing stopped). The video so far is being saved.');
+  logSession('internal', 'Capture ended by the browser (tab closed or sharing stopped).');
+  endSessionCapture();
 }
 
 async function stopSessionRecording() {
@@ -2635,8 +2748,8 @@ async function runAgentLoop() {
       continue;
     }
     lastRound = [];
-    announceGoal(goalForReply(reply, request, previousTool));
     for (const call of reply.tool_calls) {
+      announceGoal(goalForCall(reply, call, request, previousTool));
       previousTool = (call.function && call.function.name) || previousTool;
       const result = await runToolCall(call);
       lastRound.push(result);
@@ -2951,12 +3064,27 @@ async function generateSessionTitle(session, button) {
  * left instead of creating one beside it.
  */
 function startNewSession() {
+  if (blockThreadSwitch()) return;
   saveCurrentChatSession();
   state.currentSessionId = 'session-' + Date.now();
   resetConversation();
   renderChatHeader();
+  logSession('chat', 'Started a new thread.');
   generatePromptSuggestions();
   setChatSubView('chat');
+}
+
+/**
+ * The agent writes into state.messages and the chat DOM until its turn ends, and the turn's
+ * finally saves into whatever currentSessionId is by then. Switching threads mid-turn sent
+ * the rest of the run (and its save) into the thread you switched to. A recording is not
+ * affected by switching while idle: in "session" mode it keeps running across threads, and
+ * the .log marks the switch.
+ */
+function blockThreadSwitch() {
+  if (!state.busy) return false;
+  showStatus('The agent is still working in this conversation. Wait for it to answer before switching threads.');
+  return true;
 }
 
 function saveCurrentChatSession() {
@@ -2994,6 +3122,8 @@ function saveCurrentChatSession() {
 }
 
 function loadChatSession(session) {
+  if (session.id !== state.currentSessionId && blockThreadSwitch()) return;
+  if (session.id !== state.currentSessionId) logSession('chat', 'Switched to thread "' + (session.title || 'Untitled') + '".');
   state.currentSessionId = session.id;
   state.messages = [...session.messages];
 
@@ -3099,9 +3229,12 @@ function renderChatThreadsView() {
     delBtn.title = 'Delete thread';
     delBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (state.currentSessionId === s.id && blockThreadSwitch()) return;
       state.chatSessions = state.chatSessions.filter((item) => item.id !== s.id);
       chrome.storage.local.set({ chatSessions: state.chatSessions });
       if (state.currentSessionId === s.id) {
+        // A fresh id too, or the next message re-creates the thread that was just deleted.
+        state.currentSessionId = 'session-' + Date.now();
         resetConversation();
       }
       renderChatThreadsView();
