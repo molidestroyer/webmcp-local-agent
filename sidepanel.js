@@ -31,10 +31,11 @@ const SYSTEM_PROMPT = [
   'WebMCP tools, and you are the only thing that can call them.',
   '',
   'HOW TO ANSWER',
-  '- If the request can be done with a tool, CALL THE TOOL. Do not describe what you are',
-  '  about to do: the user sees what you do, not what you plan.',
-  '- Never say "I will", "let me" or "I\'m going to" about a tool. Either you call it in this',
-  '  same turn, or you do not mention it.',
+  '- If the request can be done with a tool, CALL THE TOOL. Text never replaces the call.',
+  '- In the SAME response as the call, write ONE short sentence (under 15 words) saying WHY',
+  '  you make it, for the person watching the screen. Example: "The form needs a surname',
+  '  before it can be submitted." For "wait", say what you are waiting for. Give the reason,',
+  '  not the plan: never "I will", "let me" or "I\'m going to". No sentence without a call.',
   '- Never report something as done unless a tool returned a result saying so.',
   '- Ask the user only when a REQUIRED parameter is missing and cannot be inferred. Do not',
   '  ask for permission: the panel already does that when the user wants it.',
@@ -2186,11 +2187,16 @@ function announceGoal(text) {
   if (state.showVirtualCursor) bridge('hud', { phase: 'goal', text, corner: state.overlayCorner });
 }
 
-function goalForReply(reply) {
+function goalForReply(reply, request, previousTool) {
   const first = reply.tool_calls && reply.tool_calls[0] && reply.tool_calls[0].function;
-  return Goal.goalFromText(reply.thinking)
-    || Goal.goalFromText(reply.content)
-    || Goal.goalFromTool(first && first.name);
+  return Goal.pickGoal({
+    thinking: reply.thinking,
+    content: reply.content,
+    toolName: first && first.name,
+    toolArgs: first && parseArguments(first.arguments),
+    previousTool,
+    request,
+  });
 }
 
 async function copilotChat(messages, tools, onChunk) {
@@ -2588,6 +2594,7 @@ async function runAgentLoop() {
   const request = lastUserRequest();
   let lastRound = [];
   let nudges = 0;
+  let previousTool = ''; // the step before the one being announced: why a `wait` waits
   for (let step = 0; step < maxSteps; step++) {
     // After a tool ran, the page may still be mounting the next view.
     if (lastRound.length) await settleTools();
@@ -2628,8 +2635,9 @@ async function runAgentLoop() {
       continue;
     }
     lastRound = [];
-    announceGoal(goalForReply(reply));
+    announceGoal(goalForReply(reply, request, previousTool));
     for (const call of reply.tool_calls) {
+      previousTool = (call.function && call.function.name) || previousTool;
       const result = await runToolCall(call);
       lastRound.push(result);
       state.messages.push(result);

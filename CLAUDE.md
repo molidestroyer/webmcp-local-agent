@@ -243,7 +243,10 @@ orden importa — lo primero que se lee pesa más:
 - `CALL THE TOOL` va **primero**. La versión hasta 0.6.23 abría con "lee los esquemas" y su
   única regla enfática era la de *esperar*.
 - Prohibir el anuncio ("I will", "let me") explícitamente, y prohibir dar algo por hecho sin
-  resultado de tool.
+  resultado de tool. **Excepción deliberada (0.7.11):** una frase corta con el *porqué*, en la
+  MISMA respuesta que la llamada y nunca sin ella. Es lo que lee la línea de objetivo del overlay
+  (`pickGoal()` en `lib/agent-goal.js`), que la muestra **entera**: recortarla ocultaba justo lo
+  que interesa. Si un modelo pequeño empieza a narrar y no llamar, el fallo está en esa regla.
 - Distinguir **preguntar por un parámetro obligatorio** de **pedir permiso**: lo segundo ya
   lo hace la casilla *Confirm every tool*, y un modelo que pide permiso parece colgado.
 - Nada de rangos sin criterio: el `wait` es **5 → 10 → 20 y parar**, dentro del `1..30` que
