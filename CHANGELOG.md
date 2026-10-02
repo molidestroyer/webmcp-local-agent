@@ -21,6 +21,9 @@
   rótulo derivado del nombre de la tool («Completing booking...»). No se le pide nada al modelo
   ni hay otra petición. Solo se envía cuando cambia, y se retira al terminar el turno
   (`lib/agent-goal.js`, con tests).
+- **Posición del overlay** como ajuste (*Overlay position*): las cuatro esquinas. La línea de
+  objetivo y la pila forman un solo bloque anclado a la esquina elegida, para poder apartarlo de
+  lo que la app tenga en ese sitio (menús, chats flotantes). Por defecto, arriba a la derecha.
 
 ## 0.7.8
 

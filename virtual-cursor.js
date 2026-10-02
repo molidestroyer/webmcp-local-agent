@@ -11,9 +11,9 @@
  * see events the page's scripts dispatch.
  *
  * That still leaves tools that change state without any DOM event, so the panel
- * also tells this script when a tool starts and ends (`hud`): a stack of cards in the
- * bottom-right corner names each call, and a goal line at the top says what the agent is
- * after. That is what makes the video readable.
+ * also tells this script when a tool starts and ends (`hud`): a stack of cards in a
+ * corner of the user's choice names each call, and a goal line above it says what the
+ * agent is after. That is what makes the video readable.
  */
 (() => {
   'use strict';
@@ -202,7 +202,10 @@
   }
 
   const stack = createHudStack();
+  const HUD_CORNERS = ['top-right', 'top-left', 'bottom-right', 'bottom-left'];
+  let hudCorner = 'top-right';
   let hudHost = null;
+  let hudBox = null;
   let hudList = null;
   let hudGoal = null;
   let goalText = '';
@@ -219,16 +222,20 @@
     root.innerHTML = `
       <style>
         :host { font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .goal { position: fixed; top: 16px; right: 16px; max-width: 380px; display: none;
-          align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px;
+        .hud { position: fixed; display: flex; flex-direction: column; gap: 8px; max-width: 380px;
+          max-height: calc(100vh - 32px); }
+        .hud[data-corner^="top"] { top: 16px; }
+        .hud[data-corner^="bottom"] { bottom: 16px; }
+        .hud[data-corner$="right"] { right: 16px; align-items: flex-end; }
+        .hud[data-corner$="left"] { left: 16px; align-items: flex-start; }
+        .goal { display: none; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px;
           background: rgba(79,70,229,.95); color: #fff; font-weight: 600; font-size: 14px;
           box-shadow: 0 10px 25px -5px rgba(0,0,0,.5); transition: opacity .3s; }
         .goal.on { display: flex; animation: in .25s ease-out; }
         .goal.out { opacity: 0; }
         .goal::before { content: "\\1F3AF"; }
-        .list { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column;
-          justify-content: flex-end; gap: 8px; max-width: 360px;
-          max-height: calc(100vh - 90px); overflow: hidden; } /* never reach the goal line */
+        .list { display: flex; flex-direction: column; justify-content: flex-end; gap: 8px;
+          min-height: 0; overflow: hidden; } /* a tall stack gives way before the goal line does */
         .card { background: rgba(17,24,39,.92); color: #fff; border: 1px solid rgba(255,255,255,.15);
           border-left: 4px solid #6366F1; border-radius: 8px; padding: 10px 14px;
           box-shadow: 0 10px 25px -5px rgba(0,0,0,.5); animation: in .25s ease-out;
@@ -245,8 +252,11 @@
           white-space: pre-wrap; word-break: break-all; }
         @keyframes in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
       </style>
-      <div class="goal"><span class="goal-text"></span></div>
-      <div class="list"></div>`;
+      <div class="hud" data-corner="${hudCorner}">
+        <div class="goal"><span class="goal-text"></span></div>
+        <div class="list"></div>
+      </div>`;
+    hudBox = root.querySelector('.hud');
     hudList = root.querySelector('.list');
     hudGoal = root.querySelector('.goal');
     (document.documentElement || document).appendChild(hudHost);
@@ -255,7 +265,7 @@
   function unmountHudIfIdle() {
     if (hudHost && !hudCards.size && !goalText) {
       hudHost.remove();
-      hudHost = hudList = hudGoal = null;
+      hudHost = hudBox = hudList = hudGoal = null;
     }
   }
 
@@ -314,12 +324,18 @@
   }
 
   /**
-   * payload: { phase: 'start', id, tool, args } | { phase: 'end', id, ok } | { phase: 'goal', text }.
+   * payload: { phase: 'start', id, tool, args } | { phase: 'end', id, ok } | { phase: 'goal', text },
+   * each optionally with `corner` (top-right | top-left | bottom-right | bottom-left).
    * Everything is set with textContent: tool names, arguments and goals come from the
    * model and the page, and must never be parsed as markup.
    */
   function hud(payload) {
     if (!payload) return;
+    // The panel sends its corner setting with every message, so a change applies at once.
+    if (HUD_CORNERS.includes(payload.corner) && payload.corner !== hudCorner) {
+      hudCorner = payload.corner;
+      if (hudBox) hudBox.dataset.corner = hudCorner;
+    }
     if (payload.phase === 'goal') {
       setGoal(payload.text);
       return;

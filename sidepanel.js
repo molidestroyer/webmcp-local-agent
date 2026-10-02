@@ -123,6 +123,7 @@ const els = {
   showCursorToggle: document.getElementById('show-cursor-toggle'),
   recordQuality: document.getElementById('record-quality'),
   recordMode: document.getElementById('record-mode'),
+  overlayCorner: document.getElementById('overlay-corner'),
   recBtn: document.getElementById('rec-btn'),
   recFolderStatus: document.getElementById('rec-folder-status'),
   recFolderPick: document.getElementById('rec-folder-pick'),
@@ -209,6 +210,7 @@ const state = {
   showVirtualCursor: false,
   recordQuality: 'standard',
   recordMode: 'turn', // 'turn' | 'session'
+  overlayCorner: 'top-right',
   resetChatOnTabSwitch: false,
   suggesting: false,
   staticSuggestions: [],
@@ -1982,7 +1984,7 @@ async function runToolCall(call) {
   const trace = ({ ok, output, ms, note }) => {
     const entry = SL.toolEntry({ name: String(name || '(unnamed)'), args, ok, output, ms, note });
     logSession('tool', entry.text, undefined, entry.detail);
-    if (hudId) bridge('hud', { phase: 'end', id: hudId, ok });
+    if (hudId) bridge('hud', { phase: 'end', id: hudId, ok });  // corner not needed: the card exists already
   };
 
   const finish = (ok, output) => {
@@ -2012,7 +2014,7 @@ async function runToolCall(call) {
   // Tools change the page without firing DOM events, so the banner is what tells the
   // video which tool is running. The beat lets it appear before the page reacts.
   if (hudId) {
-    await bridge('hud', { phase: 'start', id: hudId, tool: name, args: previewArgs(args) });
+    await bridge('hud', { phase: 'start', id: hudId, tool: name, args: previewArgs(args), corner: state.overlayCorner });
     await new Promise((r) => setTimeout(r, HUD_BEAT_MS));
   }
 
@@ -2060,7 +2062,7 @@ function announceGoal(text) {
   if (text === currentGoal) return;
   currentGoal = text;
   if (text) logSession('goal', text);
-  if (sessionLive && state.showVirtualCursor) bridge('hud', { phase: 'goal', text });
+  if (sessionLive && state.showVirtualCursor) bridge('hud', { phase: 'goal', text, corner: state.overlayCorner });
 }
 
 function goalForReply(reply) {
@@ -3041,12 +3043,14 @@ function syncRecordingControls() {
   if (els.showCursorToggle) els.showCursorToggle.disabled = off;
   if (els.recordQuality) els.recordQuality.disabled = off;
   if (els.recordMode) els.recordMode.disabled = off;
+  if (els.overlayCorner) els.overlayCorner.disabled = off || !state.showVirtualCursor;
   updateRecButton();
 }
 bindRecordingSetting(els.recordSessionToggle, 'recordSession', (el) => el.checked);
 bindRecordingSetting(els.showCursorToggle, 'showVirtualCursor', (el) => el.checked);
 bindRecordingSetting(els.recordQuality, 'recordQuality', (el) => el.value);
 bindRecordingSetting(els.recordMode, 'recordMode', (el) => el.value);
+bindRecordingSetting(els.overlayCorner, 'overlayCorner', (el) => el.value);
 
 els.confirmTools.addEventListener('change', () => {
   chrome.storage.local.set({ confirmTools: els.confirmTools.checked });
@@ -3292,6 +3296,7 @@ if (els.copilotCopyCodeBtn) {
     'showVirtualCursor',
     'recordQuality',
     'recordMode',
+    'overlayCorner',
     'resetChatOnTabSwitch',
     'catalogSourceMode',
     'catalogUrl',
@@ -3316,6 +3321,9 @@ if (els.copilotCopyCodeBtn) {
   if (els.showCursorToggle) els.showCursorToggle.checked = state.showVirtualCursor;
   state.recordMode = stored.recordMode === 'session' ? 'session' : 'turn';
   if (els.recordMode) els.recordMode.value = state.recordMode;
+  state.overlayCorner = ['top-right', 'top-left', 'bottom-right', 'bottom-left'].includes(stored.overlayCorner)
+    ? stored.overlayCorner : 'top-right';
+  if (els.overlayCorner) els.overlayCorner.value = state.overlayCorner;
   if (els.recordQuality) els.recordQuality.value = state.recordQuality;
   syncRecordingControls();
   renderRecordingsFolder();
