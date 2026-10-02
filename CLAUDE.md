@@ -394,6 +394,14 @@ lines. Two things it is easy to get wrong:
   `resolveRecordingsDir()` call at the top of `beginSessionCapture()`. Don't write to the folder
   from the service worker or the offscreen document: the handle belongs to the panel.
 
+- **Session log and on-page overlay** (0.7.9). The `.log` format is `lib/session-log.js`; a tool's
+  result goes in `detail`, indented under its line. Every way `runToolCall` can end goes through
+  `trace()`, so a new exit path must too, or it vanishes from the log and the banner. The overlay
+  is a stack (`createHudStack()` in `virtual-cursor.js`, pure and tested): minimum on-screen
+  time, max 4 cards, oldest finished evicted first. The goal line (`lib/agent-goal.js`) must stay
+  free: it reads what the model already emitted and falls back to a label from the tool name.
+  Never add a request, or a required field, just to feed it.
+
 ## Running it
 
 ```bash

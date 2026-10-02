@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.9
+
+- **El `.log` ya no recorta lo importante.** Los mensajes del usuario se guardan enteros (tope de
+  4000 caracteres, y si se corta lo dice), y cada tool lleva debajo su `Result:` (o `Error:`):
+  ```
+  [+  30.1s] [tool] complete_booking({"firstName":"Carlos"}) -> ok in 3 ms
+             Result: {"confirmationId":"HB-7821","status":"confirmed"}
+  ```
+  Todas las salidas pasan por el mismo `trace()` de `runToolCall`: tools de la página,
+  `wait`, tools inexistentes y llamadas canceladas por el usuario. `settleTools` y los empujones
+  salen como `[internal]`. El formato vive en `lib/session-log.js`, con tests.
+- **Pila de tarjetas en el vídeo.** Una tool que se resuelve en 3 ms desaparecía al instante;
+  ahora cada tarjeta se queda al menos 2,8 s. Hay como mucho 4 a la vez: las nuevas entran por
+  abajo, las anteriores suben, y si llega una ráfaga se expulsan antes las más antiguas ya
+  terminadas. Las reglas de tiempo y capacidad son `createHudStack()` (sin DOM, con tests).
+  `wait` también aparece.
+- **Línea de objetivo** arriba a la derecha. Sale de lo que el modelo ya emitió (su razonamiento
+  o la frase previa a la tool, primera frase, 10 palabras como máximo) y, si no hay, de un
+  rótulo derivado del nombre de la tool («Completing booking...»). No se le pide nada al modelo
+  ni hay otra petición. Solo se envía cuando cambia, y se retira al terminar el turno
+  (`lib/agent-goal.js`, con tests).
+
 ## 0.7.8
 
 - Nuevo ajuste *Recordings folder*. `chrome.downloads` no se puede silenciar: con «Preguntar

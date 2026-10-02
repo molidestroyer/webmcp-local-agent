@@ -1951,13 +1951,6 @@ function parseArguments(raw) {
 const HUD_BEAT_MS = 300;
 let hudSeq = 0;
 
-function compactJson(value, max) {
-  let text;
-  try { text = JSON.stringify(value); } catch (_) { text = String(value); }
-  text = text === undefined ? '' : text;
-  return text.length > max ? text.slice(0, max) + '\u2026' : text;
-}
-
 /** Pretty arguments for the on-page banner: a few short lines, never the whole payload. */
 function previewArgs(args) {
   if (!args || !Object.keys(args).length) return '';
@@ -1983,8 +1976,18 @@ async function runToolCall(call) {
     content: text,
   });
 
+  // Every way a call can end (page tool, built-in wait, unknown tool, user cancel) is
+  // traced here, so the session log and the on-page banner see all of them alike.
+  const hudId = sessionLive && state.showVirtualCursor ? ++hudSeq : 0;
+  const trace = ({ ok, output, ms, note }) => {
+    const entry = SL.toolEntry({ name: String(name || '(unnamed)'), args, ok, output, ms, note });
+    logSession('tool', entry.text, undefined, entry.detail);
+    if (hudId) bridge('hud', { phase: 'end', id: hudId, ok });
+  };
+
   const finish = (ok, output) => {
     recordExecution({ tool: String(name || 'unknown'), origin: 'chat', args, ok, output });
+    trace({ ok, output });
     return toolMessage(ok ? output : 'Error: ' + output);
   };
 
@@ -2001,8 +2004,16 @@ async function runToolCall(call) {
       const text = 'The user cancelled this tool call.';
       card.cancelled(text);
       recordExecution({ tool: name || 'wait', origin: 'chat', args, ok: false, output: text });
+      trace({ ok: false, output: text, note: 'CANCELLED' });
       return toolMessage(text);
     }
+  }
+
+  // Tools change the page without firing DOM events, so the banner is what tells the
+  // video which tool is running. The beat lets it appear before the page reacts.
+  if (hudId) {
+    await bridge('hud', { phase: 'start', id: hudId, tool: name, args: previewArgs(args) });
+    await new Promise((r) => setTimeout(r, HUD_BEAT_MS));
   }
 
   if (isBuiltinWait) {
@@ -2014,34 +2025,49 @@ async function runToolCall(call) {
     const text = `Waited ${sec} second(s) for page updates. Current page exposes ${state.tools.length} tool(s).`;
     card.done(text);
     recordExecution({ tool: 'wait', origin: 'chat', args, ok: true, output: text, ms });
+    trace({ ok: true, output: text, ms });
     return toolMessage(text);
   }
 
-  // Tools change the page without firing DOM events, so the banner is what tells the
-  // video which tool is running. The beat lets it appear before the page reacts.
-  const hudId = sessionLive && state.showVirtualCursor ? ++hudSeq : 0;
-  if (hudId) {
-    await bridge('hud', { phase: 'start', id: hudId, tool: name, args: previewArgs(args) });
-    await new Promise((r) => setTimeout(r, HUD_BEAT_MS));
-  }
   const started = performance.now();
   const answer = await executeOnPage(name, args);
   const ms = performance.now() - started;
-  const failed = !answer || Boolean(answer.error);
-  if (hudId) bridge('hud', { phase: 'end', id: hudId, ok: !failed });
-  logSession('tool', `${name}(${compactJson(args, 200)}) -> ${failed ? 'FAILED: ' + String((answer && answer.error) || 'unknown error') : 'ok in ' + Math.round(ms) + ' ms'}`);
 
-  if (failed) {
+  if (!answer || answer.error) {
     const text = (answer && answer.error) || 'Unknown error while running the tool.';
     card.fail(text);
     recordExecution({ tool: name, origin: 'chat', args, ok: false, output: text, ms });
+    trace({ ok: false, output: text, ms });
     return toolMessage('Error: ' + text);
   }
 
   const text = resultToText(answer.result);
   card.done(text);
   recordExecution({ tool: name, origin: 'chat', args, ok: true, output: text, ms });
+  trace({ ok: true, output: text, ms });
   return toolMessage(text);
+}
+
+/**
+ * The line over the recorded page saying what the agent is after. Taken from what the
+ * model already produced (its reasoning, else the sentence before the tool call) and, when
+ * there is none, from the tool's name: no extra tokens, no extra request. Only sent when it
+ * changes, so it stays steady across the calls of one phase.
+ */
+let currentGoal = '';
+function announceGoal(text) {
+  text = String(text || '');
+  if (text === currentGoal) return;
+  currentGoal = text;
+  if (text) logSession('goal', text);
+  if (sessionLive && state.showVirtualCursor) bridge('hud', { phase: 'goal', text });
+}
+
+function goalForReply(reply) {
+  const first = reply.tool_calls && reply.tool_calls[0] && reply.tool_calls[0].function;
+  return Goal.goalFromText(reply.thinking)
+    || Goal.goalFromText(reply.content)
+    || Goal.goalFromTool(first && first.name);
 }
 
 async function copilotChat(messages, tools, onChunk) {
@@ -2094,6 +2120,7 @@ async function beginSessionCapture() {
   if (started) {
     await startSessionLog();
     sessionStartedAt = Date.now();
+    currentGoal = ''; // a new recording starts with an empty goal line
   } else if (state.recordSession && state.recordMode === 'session') {
     recordingDeclined = true;
   }
@@ -2111,10 +2138,11 @@ async function endSessionCapture() {
 async function runAgent() {
   if (!(state.recordMode === 'session' && recordingDeclined)) await beginSessionCapture();
   // A marker per message, so a long recording can be read against the conversation.
-  logSession('chat', 'User: ' + compactJson(lastUserRequest(), 200));
+  logSession('chat', 'User: ' + SL.clip(lastUserRequest(), SL.LIMITS.chat));
   try {
     await runAgentLoop();
   } finally {
+    announceGoal('');
     if (state.recordMode !== 'session') await endSessionCapture();
   }
 }
@@ -2173,9 +2201,13 @@ let sessionLive = false; // a recording is running, so the banner and the log ap
 let sessionLog = null;   // { startedAt, tabId, url, lines: [{ t, kind, text }] }
 let sessionStem = null;
 
-function logSession(kind, text, t) {
+const SL = globalThis.__WebMCPSessionLog;
+const Goal = globalThis.__WebMCPAgentGoal;
+
+/** `detail` is an indented block under the line (a tool's result or error). */
+function logSession(kind, text, t, detail) {
   if (!sessionLog) return;
-  sessionLog.lines.push({ t: t || Date.now(), kind, text: String(text) });
+  sessionLog.lines.push({ t: t || Date.now(), kind, text: String(text), ...(detail ? { detail: String(detail) } : {}) });
 }
 
 async function startSessionLog() {
@@ -2183,25 +2215,6 @@ async function startSessionLog() {
   try { url = (await chrome.tabs.get(state.tabId)).url || ''; } catch (_) { /* tab gone */ }
   sessionLog = { startedAt: Date.now(), tabId: state.tabId, url, lines: [] };
   await chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: state.tabId, enabled: true }).catch(() => {});
-}
-
-function formatSessionLog(log, endedAt) {
-  const offset = (t) => '+' + ((t - log.startedAt) / 1000).toFixed(1).padStart(6, ' ') + 's';
-  const errors = log.lines.filter((l) => l.kind === 'error').length;
-  const head = [
-    'WebMCP Local Agent - session log',
-    'Started: ' + new Date(log.startedAt).toISOString(),
-    'Ended:   ' + new Date(endedAt).toISOString(),
-    'Page:    ' + (log.url || '(unknown)'),
-    'Page console errors: ' + errors,
-    '',
-  ];
-  const body = log.lines
-    .slice()
-    .sort((a, b) => a.t - b.t)
-    .map((l) => `[${offset(l.t)}] [${l.kind}] ${l.text}`);
-  if (!body.length) body.push('(nothing was logged during the session)');
-  return head.concat(body).join('\n') + '\n';
 }
 
 async function saveSessionLog() {
@@ -2212,7 +2225,7 @@ async function saveSessionLog() {
   // Stop capturing first, so the page is left exactly as we found it.
   await chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: log.tabId, enabled: false }).catch(() => {});
   try {
-    const blob = new Blob([formatSessionLog(log, Date.now())], { type: 'text/plain' });
+    const blob = new Blob([SL.formatSessionLog(log, Date.now())], { type: 'text/plain' });
     const where = await saveRecordingFile(blob, `${stem}.log`, await resolveRecordingsDir());
     console.log('[Rec] Session log saved to ' + where + ' (' + log.lines.length + ' line(s)).');
   } catch (err) {
@@ -2434,12 +2447,14 @@ async function settleTools() {
     if (next === signature) {
       console.log('[Agent] Tools settled after ' + (waited + SETTLE_STEP_MS) + ' ms: '
         + startCount + ' -> ' + state.tools.length + ' tool(s).');
+      logSession('internal', `settleTools: settled after ${waited + SETTLE_STEP_MS} ms, ${startCount} -> ${state.tools.length} tool(s)`);
       return;
     }
     signature = next;
   }
   console.warn('[Agent] Tools still changing after ' + SETTLE_MAX_MS + ' ms; continuing with '
     + state.tools.length + ' tool(s).');
+  logSession('internal', `settleTools: still changing after ${SETTLE_MAX_MS} ms, continuing with ${state.tools.length} tool(s)`);
 }
 
 async function runAgentLoop() {
@@ -2484,11 +2499,13 @@ async function runAgentLoop() {
       }
       nudges++;
       console.log('[Agent] Nudge ' + nudges + '/' + MAX_NUDGES + ' after round ' + (step + 1) + ': multi-step request, last round succeeded, reply had no question and no tool call.');
+      logSession('internal', `nudge ${nudges}/${MAX_NUDGES}: asked the model to continue after round ${step + 1}`);
       state.messages.push({ role: 'user', synthetic: true, content: NUDGE_TEXT });
       lastRound = [];
       continue;
     }
     lastRound = [];
+    announceGoal(goalForReply(reply));
     for (const call of reply.tool_calls) {
       const result = await runToolCall(call);
       lastRound.push(result);
