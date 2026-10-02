@@ -609,6 +609,77 @@
     }
   }
 
+  // --- Console capture ---------------------------------------------------
+  //
+  // While the panel records a session it asks for the page's errors, so a failure
+  // that happened mid-video leaves a log next to it. Off by default: nothing is
+  // wrapped and nothing is posted until `console-capture` enables it.
+
+  const CAPTURE_MAX_CHARS = 600;
+  let capturing = false;
+  const originalConsole = {};
+
+  function describe(value) {
+    try {
+      if (value instanceof Error) return value.stack || (value.name + ': ' + value.message);
+      if (typeof value === 'string') return value;
+      if (value === undefined) return 'undefined';
+      return JSON.stringify(value) || String(value);
+    } catch (_) {
+      return String(value);
+    }
+  }
+
+  function emitConsole(level, text) {
+    if (!capturing) return;
+    window.postMessage({
+      channel: FROM_PAGE,
+      event: 'console',
+      entry: { t: Date.now(), level, text: String(text).slice(0, CAPTURE_MAX_CHARS) },
+    }, '*');
+  }
+
+  function onWindowError(event) {
+    const target = event && event.target;
+    // A failed <img>/<script>/<link> fires 'error' at the element, not at window.
+    if (target && target !== window && target.tagName) {
+      emitConsole('error', 'Failed to load <' + String(target.tagName).toLowerCase() + '> '
+        + String(target.src || target.href || ''));
+      return;
+    }
+    const where = event && event.filename ? ' (' + event.filename + ':' + event.lineno + ')' : '';
+    emitConsole('error', 'Uncaught ' + describe((event && event.error) || (event && event.message)) + where);
+  }
+
+  function onRejection(event) {
+    emitConsole('error', 'Unhandled promise rejection: ' + describe(event && event.reason));
+  }
+
+  function setConsoleCapture(on) {
+    on = Boolean(on);
+    if (on === capturing) return;
+    capturing = on;
+    const method = on ? 'addEventListener' : 'removeEventListener';
+    window[method]('error', onWindowError, true);
+    window[method]('unhandledrejection', onRejection);
+    if (typeof console === 'undefined') return;
+    for (const level of ['error', 'warn']) {
+      if (on) {
+        const original = console[level];
+        if (typeof original !== 'function') continue;
+        originalConsole[level] = original;
+        console[level] = function (...args) {
+          // Never let capturing break the page's own logging.
+          try { emitConsole(level, args.map(describe).join(' ')); } catch (_) { /* noop */ }
+          return original.apply(this, args);
+        };
+      } else if (originalConsole[level]) {
+        console[level] = originalConsole[level];
+        delete originalConsole[level];
+      }
+    }
+  }
+
   window.addEventListener('message', async (event) => {
     if (event.source !== window) return;
     const data = event.data;
@@ -624,6 +695,9 @@
       } else if (data.action === 'execute') {
         const payload = data.payload || {};
         reply(serializable(await executeTool(payload.name, payload.args, payload.origin)));
+      } else if (data.action === 'console-capture') {
+        setConsoleCapture(data.payload && data.payload.enabled);
+        reply({ ok: true });
       } else {
         reply(null, 'Unknown action: ' + String(data.action));
       }

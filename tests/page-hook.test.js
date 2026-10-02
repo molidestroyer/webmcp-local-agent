@@ -24,7 +24,7 @@ function fakeForm(toolname) {
 }
 
 /** Boots page-hook.js against a minimal document/window. */
-function bootHook({ modelContext = null, forms = [], readyState = 'loading' } = {}) {
+function bootHook({ modelContext = null, forms = [], readyState = 'loading', console: consoleShim } = {}) {
   const windowTarget = new EventTarget();
   const documentTarget = new EventTarget();
   const formList = forms.slice();
@@ -58,6 +58,7 @@ function bootHook({ modelContext = null, forms = [], readyState = 'loading' } = 
     window: windowShim,
     document: documentShim,
     navigator: {},
+    ...(consoleShim ? { console: consoleShim } : {}),
     Event,
     EventTarget,
     MutationObserver: class { observe() {} disconnect() {} },
@@ -314,4 +315,67 @@ test('an unknown tool reports why', async () => {
   });
   const { error } = await hook.ask('execute', { name: 'nope', args: {} });
   assert.match(error, /no longer registered/);
+});
+
+// --- Console capture --------------------------------------------------------
+
+function consoleEvents(hook) {
+  const seen = [];
+  hook.windowShim.addEventListener('message', (event) => {
+    const data = event.data;
+    if (data && data.channel === FROM_PAGE && data.event === 'console') seen.push(data.entry);
+  });
+  return seen;
+}
+const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+test('console capture is off until asked, and leaves console untouched', async () => {
+  const calls = [];
+  const fake = { error: (...a) => calls.push(a), warn: () => {} };
+  const original = fake.error;
+  const hook = bootHook({ console: fake });
+  const seen = consoleEvents(hook);
+  assert.strictEqual(fake.error, original);
+  fake.error('before');
+  await tick();
+  assert.deepStrictEqual(seen, []);
+});
+
+test('console capture reports errors and warnings, still calls the real console, and restores it', async () => {
+  const calls = [];
+  const fake = { error: (...a) => calls.push(['error', ...a]), warn: (...a) => calls.push(['warn', ...a]) };
+  const original = fake.error;
+  const hook = bootHook({ console: fake });
+  const seen = consoleEvents(hook);
+  await hook.ask('console-capture', { enabled: true });
+
+  fake.error('boom', { id: 3 });
+  fake.warn('careful');
+  await tick();
+  assert.deepStrictEqual(seen.map((e) => [e.level, e.text]), [['error', 'boom {"id":3}'], ['warn', 'careful']]);
+  assert.strictEqual(calls.length, 2);
+
+  await hook.ask('console-capture', { enabled: false });
+  assert.strictEqual(fake.error, original);
+  fake.error('after');
+  await tick();
+  assert.strictEqual(seen.length, 2);
+});
+
+test('console capture reports uncaught errors, rejections and failed resources', async () => {
+  const hook = bootHook({ console: { error() {}, warn() {} } });
+  const seen = consoleEvents(hook);
+  await hook.ask('console-capture', { enabled: true });
+  const fire = (type, props) => {
+    const event = new Event(type);
+    for (const [key, value] of Object.entries(props)) Object.defineProperty(event, key, { value });
+    hook.windowShim.dispatchEvent(event);
+  };
+  fire('error', { error: new Error('kaput'), filename: 'app.js', lineno: 7 });
+  fire('unhandledrejection', { reason: 'nope' });
+  fire('error', { target: { tagName: 'IMG', src: 'https://x.test/a.png' } });
+  await tick();
+  assert.match(seen[0].text, /^Uncaught .*kaput[\s\S]*\(app\.js:7\)$/);
+  assert.strictEqual(seen[1].text, 'Unhandled promise rejection: nope');
+  assert.strictEqual(seen[2].text, 'Failed to load <img> https://x.test/a.png');
 });

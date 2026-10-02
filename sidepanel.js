@@ -1941,6 +1941,25 @@ function parseArguments(raw) {
   return {};
 }
 
+const HUD_BEAT_MS = 300;
+let hudSeq = 0;
+
+function compactJson(value, max) {
+  let text;
+  try { text = JSON.stringify(value); } catch (_) { text = String(value); }
+  text = text === undefined ? '' : text;
+  return text.length > max ? text.slice(0, max) + '\u2026' : text;
+}
+
+/** Pretty arguments for the on-page banner: a few short lines, never the whole payload. */
+function previewArgs(args) {
+  if (!args || !Object.keys(args).length) return '';
+  let text;
+  try { text = JSON.stringify(args, null, 2); } catch (_) { return ''; }
+  const lines = text.split('\n').slice(0, 6).join('\n');
+  return lines.length > 180 ? lines.slice(0, 180) + '\u2026' : lines;
+}
+
 async function runToolCall(call) {
   const fn = call.function || {};
   const name = fn.name;
@@ -1991,13 +2010,21 @@ async function runToolCall(call) {
     return toolMessage(text);
   }
 
-  // Short beat so the video shows the tool card before the page reacts.
-  if (state.recordSession && state.showVirtualCursor) await new Promise((r) => setTimeout(r, 150));
+  // Tools change the page without firing DOM events, so the banner is what tells the
+  // video which tool is running. The beat lets it appear before the page reacts.
+  const hudId = sessionLive && state.showVirtualCursor ? ++hudSeq : 0;
+  if (hudId) {
+    await bridge('hud', { phase: 'start', id: hudId, tool: name, args: previewArgs(args) });
+    await new Promise((r) => setTimeout(r, HUD_BEAT_MS));
+  }
   const started = performance.now();
   const answer = await executeOnPage(name, args);
   const ms = performance.now() - started;
+  const failed = !answer || Boolean(answer.error);
+  if (hudId) bridge('hud', { phase: 'end', id: hudId, ok: !failed });
+  logSession('tool', `${name}(${compactJson(args, 200)}) -> ${failed ? 'FAILED: ' + String((answer && answer.error) || 'unknown error') : 'ok in ' + Math.round(ms) + ' ms'}`);
 
-  if (!answer || answer.error) {
+  if (failed) {
     const text = (answer && answer.error) || 'Unknown error while running the tool.';
     card.fail(text);
     recordExecution({ tool: name, origin: 'chat', args, ok: false, output: text, ms });
@@ -2050,10 +2077,72 @@ async function copilotChat(messages, tools, onChunk) {
  */
 async function runAgent() {
   const recording = await startSessionRecording();
+  if (recording) await startSessionLog();
   try {
     await runAgentLoop();
   } finally {
-    if (recording) await stopSessionRecording();
+    if (recording) {
+      await stopSessionRecording();
+      await saveSessionLog();
+    }
+  }
+}
+
+/**
+ * Next to the video: what the page logged to its console while it ran (errors,
+ * warnings, uncaught exceptions, failed resource loads) plus a timeline of the tool
+ * calls, so an error can be placed against the footage. Saved with the video's name.
+ */
+let sessionLive = false; // a recording is running, so the banner and the log apply
+let sessionLog = null;   // { startedAt, tabId, url, lines: [{ t, kind, text }] }
+let sessionStem = null;
+
+function logSession(kind, text, t) {
+  if (!sessionLog) return;
+  sessionLog.lines.push({ t: t || Date.now(), kind, text: String(text) });
+}
+
+async function startSessionLog() {
+  let url = '';
+  try { url = (await chrome.tabs.get(state.tabId)).url || ''; } catch (_) { /* tab gone */ }
+  sessionLog = { startedAt: Date.now(), tabId: state.tabId, url, lines: [] };
+  await chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: state.tabId, enabled: true }).catch(() => {});
+}
+
+function formatSessionLog(log, endedAt) {
+  const offset = (t) => '+' + ((t - log.startedAt) / 1000).toFixed(1).padStart(6, ' ') + 's';
+  const errors = log.lines.filter((l) => l.kind === 'error').length;
+  const head = [
+    'WebMCP Local Agent - session log',
+    'Started: ' + new Date(log.startedAt).toISOString(),
+    'Ended:   ' + new Date(endedAt).toISOString(),
+    'Page:    ' + (log.url || '(unknown)'),
+    'Page console errors: ' + errors,
+    '',
+  ];
+  const body = log.lines
+    .slice()
+    .sort((a, b) => a.t - b.t)
+    .map((l) => `[${offset(l.t)}] [${l.kind}] ${l.text}`);
+  if (!body.length) body.push('(nothing was logged during the session)');
+  return head.concat(body).join('\n') + '\n';
+}
+
+async function saveSessionLog() {
+  const log = sessionLog;
+  const stem = sessionStem;
+  sessionLog = sessionStem = null;
+  if (!log || !stem) return;
+  // Stop capturing first, so the page is left exactly as we found it.
+  await chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: log.tabId, enabled: false }).catch(() => {});
+  try {
+    const blob = new Blob([formatSessionLog(log, Date.now())], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    await chrome.downloads.download({ url, filename: `webmcp-agent/${stem}.log`, saveAs: false });
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    console.log('[Rec] Session log saved (' + log.lines.length + ' line(s)).');
+  } catch (err) {
+    showStatus('Could not save the session log: ' + String((err && err.message) || err));
   }
 }
 
@@ -2076,22 +2165,25 @@ function pickTabToRecord() {
  * through the worker and the offscreen document.
  */
 let panelRecorder = null;
-let panelRecording = null; // { tabId, label, showCursor }
+let panelRecording = null; // { tabId, stem, showCursor }
 
-function recordingFileName(label) {
+/** One name for the video and its .log. */
+function recordingStem(label) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const safe = String(label).replace(/[^\w-]+/g, '_').slice(0, 40);
-  return `webmcp-agent/${stamp}-${safe}.webm`;
+  return `${stamp}-${safe}`;
 }
 
 async function startSessionRecording() {
   if (!state.recordSession) return false;
   const first = state.messages.find((m) => m.role === 'user' && !m.synthetic);
   const label = first ? String(first.content).slice(0, 40) : 'session';
+  const stem = recordingStem(label);
   const request = {
     type: 'RECORDING_START',
     tabId: state.tabId,
     label,
+    fileStem: stem,
     quality: state.recordQuality,
     showCursor: state.showVirtualCursor,
   };
@@ -2118,7 +2210,9 @@ async function startSessionRecording() {
       return false;
     }
     panelRecorder = recorder;
-    panelRecording = { tabId: state.tabId, label, showCursor: state.showVirtualCursor };
+    panelRecording = { tabId: state.tabId, stem, showCursor: state.showVirtualCursor };
+    sessionStem = stem;
+    sessionLive = true;
     if (state.showVirtualCursor) {
       await chrome.runtime.sendMessage({ type: 'PANEL_CURSOR', tabId: state.tabId, enabled: true }).catch(() => {});
     }
@@ -2128,6 +2222,8 @@ async function startSessionRecording() {
     showStatus('Could not record the session: ' + ((reply && reply.error) || 'unknown error'));
     return false;
   }
+  sessionStem = stem;
+  sessionLive = true;
   return true;
 }
 
@@ -2140,7 +2236,7 @@ async function stopPanelRecording() {
   }
   try {
     const { url, size } = await recorder.stop();
-    await chrome.downloads.download({ url, filename: recordingFileName(info.label), saveAs: false });
+    await chrome.downloads.download({ url, filename: `webmcp-agent/${info.stem}.webm`, saveAs: false });
     console.log('[Rec] Recording saved (' + Math.round(size / 1024) + ' KB).');
     // The download reads the blob asynchronously; revoke it afterwards.
     setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -2150,6 +2246,7 @@ async function stopPanelRecording() {
 }
 
 async function stopSessionRecording() {
+  sessionLive = false;
   if (panelRecorder) return stopPanelRecording();
   const reply = await chrome.runtime.sendMessage({ type: 'RECORDING_STOP' })
     .catch((err) => ({ success: false, error: String((err && err.message) || err) }));
@@ -2795,6 +2892,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 chrome.runtime.onMessage.addListener((message) => {
   if (!message) return;
+  if (message.type === 'PAGE_LOG') {
+    const entry = message.entry || {};
+    if (message.tabId === (sessionLog && sessionLog.tabId)) {
+      logSession(entry.level === 'warn' ? 'warn' : 'error', entry.text || '', entry.t);
+    }
+    return;
+  }
   if (message.type === 'tools-changed' && message.tabId === state.tabId) {
     detectPageTools();
     return;

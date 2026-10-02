@@ -9,6 +9,10 @@
  * not hook a dispatcher: it listens for the events a tool causes — click, input,
  * change, submit — and animates to their target. Isolated-world listeners do
  * see events the page's scripts dispatch.
+ *
+ * That still leaves tools that change state without any DOM event, so the panel
+ * also tells this script when a tool starts and ends (`hud`), and a small banner
+ * in the corner names it. That banner is what makes the video readable.
  */
 (() => {
   'use strict';
@@ -141,6 +145,102 @@
     });
   }
 
+  // --- Tool banner (HUD) ---------------------------------------------------
+
+  const HUD_DONE_MS = 1500;
+  const HUD_FAIL_MS = 3000;
+  const HUD_STALE_MS = 60000; // an 'end' that never arrives must not leave a card forever
+
+  let hudHost = null;
+  let hudList = null;
+  const hudCards = new Map(); // call id -> { card, status }
+
+  function mountHud() {
+    if (hudHost) return;
+    hudHost = document.createElement('div');
+    hudHost.setAttribute('aria-hidden', 'true');
+    hudHost.style.cssText = 'all:initial;position:fixed;top:0;right:0;pointer-events:none;z-index:' + Z + ';';
+    const root = hudHost.attachShadow({ mode: 'closed' });
+    root.innerHTML = `
+      <style>
+        .list { position: fixed; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px;
+          max-width: 360px; font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .card { background: rgba(17,24,39,.92); color: #fff; border: 1px solid rgba(255,255,255,.15);
+          border-left: 4px solid #6366F1; border-radius: 8px; padding: 10px 14px;
+          box-shadow: 0 10px 25px -5px rgba(0,0,0,.5); animation: in .25s ease-out;
+          transition: opacity .3s, transform .3s, border-color .2s; }
+        .card.ok { border-left-color: #10B981; }
+        .card.fail { border-left-color: #EF4444; }
+        .card.out { opacity: 0; transform: translateY(-10px); }
+        .title { display: flex; gap: 6px; align-items: center; font-weight: 600; color: #A5B4FC; word-break: break-all; }
+        .ok .title { color: #6EE7B7; }
+        .fail .title { color: #FCA5A5; }
+        .status { margin-left: auto; font-weight: 400; font-size: 11px; color: #94A3B8; white-space: nowrap; }
+        .args { margin-top: 4px; color: #CBD5E1; font: 11px/1.4 ui-monospace, Menlo, Consolas, monospace;
+          white-space: pre-wrap; word-break: break-all; }
+        @keyframes in { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+      </style>
+      <div class="list"></div>`;
+    hudList = root.querySelector('.list');
+    (document.documentElement || document).appendChild(hudHost);
+  }
+
+  function removeHudCard(id) {
+    const entry = hudCards.get(id);
+    if (!entry) return;
+    hudCards.delete(id);
+    entry.card.classList.add('out');
+    setTimeout(() => {
+      entry.card.remove();
+      if (!hudCards.size && hudHost) {
+        hudHost.remove();
+        hudHost = hudList = null;
+      }
+    }, 320);
+  }
+
+  /**
+   * payload: { phase: 'start', id, tool, args } | { phase: 'end', id, ok }.
+   * Everything is set with textContent: tool names and arguments come from the
+   * model and the page, and must never be parsed as markup.
+   */
+  function hud(payload) {
+    if (!payload || payload.id === undefined) return;
+    const id = String(payload.id);
+    if (payload.phase === 'start') {
+      mountHud();
+      const card = document.createElement('div');
+      card.className = 'card';
+      const title = document.createElement('div');
+      title.className = 'title';
+      const name = document.createElement('span');
+      name.textContent = '\u26A1 ' + String(payload.tool || 'tool');
+      const status = document.createElement('span');
+      status.className = 'status';
+      status.textContent = 'running\u2026';
+      title.append(name, status);
+      card.appendChild(title);
+      if (payload.args) {
+        const args = document.createElement('div');
+        args.className = 'args';
+        args.textContent = String(payload.args);
+        card.appendChild(args);
+      }
+      hudList.appendChild(card);
+      hudCards.set(id, { card, status });
+      setTimeout(() => removeHudCard(id), HUD_STALE_MS);
+      return;
+    }
+    if (payload.phase === 'end') {
+      const entry = hudCards.get(id);
+      if (!entry) return;
+      const ok = Boolean(payload.ok);
+      entry.card.classList.add(ok ? 'ok' : 'fail');
+      entry.status.textContent = ok ? '\u2713 done' : '\u2717 failed';
+      setTimeout(() => removeHudCard(id), ok ? HUD_DONE_MS : HUD_FAIL_MS);
+    }
+  }
+
   function setEnabled(on) {
     on = Boolean(on);
     if (on === enabled) return;
@@ -155,5 +255,5 @@
     else unmount();
   }
 
-  globalThis[FLAG] = { setEnabled };
+  globalThis[FLAG] = { setEnabled, hud };
 })();

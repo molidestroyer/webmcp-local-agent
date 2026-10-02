@@ -83,6 +83,8 @@ chrome.runtime.onConnect.addListener((port) => {
   if (typeof tabId !== 'number') return;
 
   ports.set(tabId, port);
+  // A navigation builds a fresh page-hook with capturing off; switch it back on.
+  if (tabId === consoleCaptureTab) bridge(tabId, 'console-capture', { enabled: true }).catch(() => {});
   // Badge the icon without waiting for the side panel to be opened.
   setTimeout(() => refreshBadge(tabId), BADGE_SETTLE_MS);
 
@@ -97,6 +99,8 @@ chrome.runtime.onConnect.addListener((port) => {
     } else if (message.type === 'event' && message.event === 'tools-changed') {
       refreshBadge(tabId);
       chrome.runtime.sendMessage({ type: 'tools-changed', tabId }).catch(() => {});
+    } else if (message.type === 'event' && message.event === 'console' && tabId === consoleCaptureTab) {
+      chrome.runtime.sendMessage({ type: 'PAGE_LOG', tabId, entry: message.entry }).catch(() => {});
     }
   });
 
@@ -215,9 +219,11 @@ const QUALITY = {
 };
 
 /** One recording at a time: the offscreen document holds a single recorder. */
-let recording = null; // { tabId, label, showCursor }
+let recording = null; // { tabId, label, fileStem, showCursor }
 /** Tab whose cursor the side panel asked for while it records on its own. */
 let panelCursorTab = null;
+/** Tab whose page console errors the side panel wants while a session records. */
+let consoleCaptureTab = null;
 
 async function ensureOffscreen() {
   const existing = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
@@ -260,7 +266,7 @@ async function captureStreamId(tabId, picked) {
   }
 }
 
-async function startRecording({ tabId, label, quality, showCursor, streamId: pickedId, source: pickedSource }) {
+async function startRecording({ tabId, label, fileStem, quality, showCursor, streamId: pickedId, source: pickedSource }) {
   if (recording) await stopRecording().catch(() => {});
   if (typeof tabId !== 'number') throw new Error('There is no active tab to record.');
   const preset = QUALITY[quality] || QUALITY.standard;
@@ -269,21 +275,25 @@ async function startRecording({ tabId, label, quality, showCursor, streamId: pic
   await ensureOffscreen();
   const answer = await toOffscreen({ type: 'REC_START', streamId, source, ...preset });
   if (!answer || !answer.success) throw new Error((answer && answer.error) || 'The recorder did not start.');
-  recording = { tabId, label: label || 'session', showCursor: Boolean(showCursor) };
+  recording = { tabId, label: label || 'session', fileStem: fileStem || null, showCursor: Boolean(showCursor) };
   if (recording.showCursor) await setCursor(tabId, true);
   diag('INFO', `Recording started on tab ${tabId} (${preset.fps} fps).`, 'Rec/SW');
 }
 
 async function stopRecording() {
   if (!recording) return { skipped: true };
-  const { tabId, label, showCursor } = recording;
+  const { tabId, label, fileStem, showCursor } = recording;
   recording = null;
   if (showCursor) await setCursor(tabId, false);
   const answer = await toOffscreen({ type: 'REC_STOP' });
   if (!answer || !answer.success) throw new Error((answer && answer.error) || 'The recorder did not stop cleanly.');
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const safe = String(label).replace(/[^\w-]+/g, '_').slice(0, 40);
-  await chrome.downloads.download({ url: answer.url, filename: `webmcp-agent/${stamp}-${safe}.webm`, saveAs: false });
+  // The panel picks the stem so the video and its .log sit side by side with one name.
+  let stem = fileStem && String(fileStem).replace(/[^\w-]+/g, '_').slice(0, 80);
+  if (!stem) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    stem = `${stamp}-${String(label).replace(/[^\w-]+/g, '_').slice(0, 40)}`;
+  }
+  await chrome.downloads.download({ url: answer.url, filename: `webmcp-agent/${stem}.webm`, saveAs: false });
   // Give the download time to read the blob before it is revoked.
   setTimeout(() => chrome.offscreen.closeDocument().catch(() => {}), 60000);
   diag('INFO', `Recording saved (${Math.round(answer.size / 1024)} KB).`, 'Rec/SW');
@@ -520,6 +530,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'PANEL_CURSOR') {
     panelCursorTab = message.enabled ? message.tabId : null;
     setCursor(message.tabId, Boolean(message.enabled)).then(() => sendResponse({ success: true }));
+    return true;
+  }
+
+  if (message.type === 'CONSOLE_CAPTURE') {
+    consoleCaptureTab = message.enabled ? message.tabId : null;
+    bridge(message.tabId, 'console-capture', { enabled: Boolean(message.enabled) })
+      .then((answer) => sendResponse({ success: !answer.error, error: answer.error }));
     return true;
   }
 

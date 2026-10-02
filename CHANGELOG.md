@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.6
+
+- El vídeo no dejaba ver qué hacía el agente: las tools de WebMCP se ejecutan con
+  `executeTool`, no con clics ni eventos de teclado, así que el cursor virtual, que escucha
+  eventos del DOM, se quedaba mudo y la página parecía cambiar «por arte de magia». Con
+  *Show cursor…* activado, el panel avisa a la pestaña antes y después de cada tool
+  (acción `hud` por el puente existente, sin `tabs.sendMessage`) y `virtual-cursor.js` dibuja
+  en la esquina superior derecha una tarjeta con el nombre y los argumentos, que pasa a ✓ o ✗
+  al terminar. Hay una pausa de 300 ms para que aparezca en el vídeo antes de que cambie el DOM.
+  Todo el texto va con `textContent`: nombre y argumentos vienen del modelo.
+- Junto al `.webm` se guarda ahora un `.log` con el mismo nombre: errores y avisos de consola de
+  la página, excepciones sin capturar, promesas rechazadas, recursos que no cargaron y una línea
+  de tiempo de las tools (`[+12.3s] [tool] nombre(args) -> ok`). La captura (`page-hook.js`,
+  acción `console-capture`) solo está activa mientras se graba, sobrevive a las navegaciones y
+  deja `console.error/warn` como estaban al terminar.
+
 ## 0.7.5
 
 - `AbortError: Error starting tab capture (source=desktop, id length=24)`: un id de

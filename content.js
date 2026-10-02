@@ -41,6 +41,14 @@
         } catch (_) { /* the panel was closed */ }
         return;
       }
+      if (message.action === 'hud') {
+        const api = globalThis.__webmcpVirtualCursor__;
+        if (api) api.hud(message.payload);
+        try {
+          port.postMessage({ type: 'response', id: message.id, result: { ok: Boolean(api) }, error: null });
+        } catch (_) { /* the panel was closed */ }
+        return;
+      }
       const answer = await askPage(message.action, message.payload);
       try {
         port.postMessage({
@@ -84,6 +92,14 @@
     if (data.event === 'tools-changed') {
       try {
         if (port) port.postMessage({ type: 'event', event: 'tools-changed' });
+      } catch (_) { /* noop */ }
+      return;
+    }
+
+    // A console error the page raised while a recording is running.
+    if (data.event === 'console') {
+      try {
+        if (port) port.postMessage({ type: 'event', event: 'console', entry: data.entry });
       } catch (_) { /* noop */ }
       return;
     }
