@@ -122,6 +122,12 @@ const els = {
   recordSessionToggle: document.getElementById('record-session-toggle'),
   showCursorToggle: document.getElementById('show-cursor-toggle'),
   recordQuality: document.getElementById('record-quality'),
+  recordMode: document.getElementById('record-mode'),
+  recBtn: document.getElementById('rec-btn'),
+  recFolderStatus: document.getElementById('rec-folder-status'),
+  recFolderPick: document.getElementById('rec-folder-pick'),
+  recFolderClear: document.getElementById('rec-folder-clear'),
+  recBtnLabel: document.getElementById('rec-btn-label'),
   catalogSourceNone: document.getElementById('catalog-source-none'),
   catalogSourceDemo: document.getElementById('catalog-source-demo'),
   catalogSourceRemote: document.getElementById('catalog-source-remote'),
@@ -202,6 +208,7 @@ const state = {
   recordSession: false,
   showVirtualCursor: false,
   recordQuality: 'standard',
+  recordMode: 'turn', // 'turn' | 'session'
   resetChatOnTabSwitch: false,
   suggesting: false,
   staticSuggestions: [],
@@ -2071,22 +2078,91 @@ async function copilotChat(messages, tools, onChunk) {
 }
 
 /**
- * Recording wraps the whole agent turn, so it is one place that starts it and
- * one `finally` that stops it: runAgent has several early returns.
+ * Two lifetimes for one recording. 'turn' wraps a single agent turn (start on send, stop
+ * when it answers). 'session' starts with the first message and runs across messages and
+ * navigations until the user presses Rec. Either way there is one start and one stop path
+ * (beginSessionCapture / endSessionCapture), because runAgent has several early returns.
  * A failure to record is reported but never blocks the agent.
  */
+let recordingDeclined = false; // the user cancelled the picker; do not ask again every message
+
+async function beginSessionCapture() {
+  if (sessionLive) return true;
+  // Re-grant folder access now, while the click that got us here still counts as a gesture.
+  await resolveRecordingsDir().catch(() => null);
+  const started = await startSessionRecording();
+  if (started) {
+    await startSessionLog();
+    sessionStartedAt = Date.now();
+  } else if (state.recordSession && state.recordMode === 'session') {
+    recordingDeclined = true;
+  }
+  updateRecButton();
+  return started;
+}
+
+async function endSessionCapture() {
+  if (!sessionLive) return;
+  await stopSessionRecording();
+  await saveSessionLog();
+  updateRecButton();
+}
+
 async function runAgent() {
-  const recording = await startSessionRecording();
-  if (recording) await startSessionLog();
+  if (!(state.recordMode === 'session' && recordingDeclined)) await beginSessionCapture();
+  // A marker per message, so a long recording can be read against the conversation.
+  logSession('chat', 'User: ' + compactJson(lastUserRequest(), 200));
   try {
     await runAgentLoop();
   } finally {
-    if (recording) {
-      await stopSessionRecording();
-      await saveSessionLog();
-    }
+    if (state.recordMode !== 'session') await endSessionCapture();
   }
 }
+
+let sessionStartedAt = 0;
+let recTimer = null;
+
+function updateRecButton() {
+  const btn = els.recBtn;
+  if (!btn) return;
+  // Always reachable while live, so a recording can never be left without a stop button.
+  btn.hidden = !(sessionLive || (state.recordSession && state.recordMode === 'session'));
+  btn.classList.toggle('rec-btn--live', sessionLive);
+  btn.title = sessionLive ? 'Stop recording and save the video and log' : 'Start recording this session';
+  if (sessionLive && !recTimer) recTimer = setInterval(updateRecButton, 1000);
+  if (!sessionLive && recTimer) { clearInterval(recTimer); recTimer = null; }
+  if (!sessionLive) {
+    els.recBtnLabel.textContent = 'Rec';
+    return;
+  }
+  const secs = Math.floor((Date.now() - sessionStartedAt) / 1000);
+  const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+  const ss = String(secs % 60).padStart(2, '0');
+  els.recBtnLabel.textContent = `Stop ${mm}:${ss}`;
+}
+
+if (els.recBtn) {
+  els.recBtn.addEventListener('click', async () => {
+    els.recBtn.disabled = true;
+    try {
+      if (sessionLive) {
+        await endSessionCapture();
+      } else {
+        recordingDeclined = false;
+        await beginSessionCapture();
+      }
+    } finally {
+      els.recBtn.disabled = false;
+      updateRecButton();
+    }
+  });
+}
+
+// Closing the panel cannot save a picker recording (its recorder dies with the panel), but
+// a worker-side one can still be finished instead of being left running forever.
+window.addEventListener('pagehide', () => {
+  if (sessionLive && !panelRecorder) chrome.runtime.sendMessage({ type: 'RECORDING_STOP' }).catch(() => {});
+});
 
 /**
  * Next to the video: what the page logged to its console while it ran (errors,
@@ -2137,10 +2213,8 @@ async function saveSessionLog() {
   await chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: log.tabId, enabled: false }).catch(() => {});
   try {
     const blob = new Blob([formatSessionLog(log, Date.now())], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    await chrome.downloads.download({ url, filename: `webmcp-agent/${stem}.log`, saveAs: false });
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-    console.log('[Rec] Session log saved (' + log.lines.length + ' line(s)).');
+    const where = await saveRecordingFile(blob, `${stem}.log`, await resolveRecordingsDir());
+    console.log('[Rec] Session log saved to ' + where + ' (' + log.lines.length + ' line(s)).');
   } catch (err) {
     showStatus('Could not save the session log: ' + String((err && err.message) || err));
   }
@@ -2227,6 +2301,70 @@ async function startSessionRecording() {
   return true;
 }
 
+// --- Where recordings go -----------------------------------------------------
+
+const Folder = globalThis.__WebMCPRecordingsFolder;
+const FOLDER_UNSET_TEXT = els.recFolderStatus ? els.recFolderStatus.textContent : '';
+
+/** The chosen folder if it can be written to right now, else null (downloads are the fallback). */
+async function resolveRecordingsDir() {
+  if (!Folder) return null;
+  const handle = await Folder.load();
+  return (await Folder.ensurePermission(handle)) ? handle : null;
+}
+
+async function renderRecordingsFolder() {
+  if (!Folder || !els.recFolderStatus) return;
+  const handle = await Folder.load();
+  els.recFolderClear.hidden = !handle;
+  els.recFolderPick.textContent = handle ? 'Change…' : 'Choose…';
+  els.recFolderStatus.textContent = handle
+    ? `Saving to the folder "${handle.name}". If Chrome asks again for access, allow it the next time you start a recording; until then files go to Downloads/webmcp-agent/.`
+    : FOLDER_UNSET_TEXT;
+}
+
+if (els.recFolderPick) {
+  els.recFolderPick.addEventListener('click', async () => {
+    if (!Folder || !Folder.supported()) {
+      showStatus('This browser cannot pick a folder; recordings keep going to Downloads.');
+      return;
+    }
+    try {
+      await Folder.pick();
+    } catch (err) {
+      if (!err || err.name !== 'AbortError') showStatus('Could not use that folder: ' + String((err && err.message) || err));
+    }
+    renderRecordingsFolder();
+  });
+}
+if (els.recFolderClear) {
+  els.recFolderClear.addEventListener('click', async () => {
+    await Folder.forget().catch(() => {});
+    renderRecordingsFolder();
+  });
+}
+
+/**
+ * Saves a blob URL (or a Blob) as `name`. Into the chosen folder when it is writable,
+ * else through chrome.downloads, so a recording is never lost over a permission.
+ */
+async function saveRecordingFile(source, name, dir) {
+  if (dir) {
+    try {
+      const data = typeof source === 'string' ? await (await fetch(source)).blob() : source;
+      await Folder.writeFile(dir, name, data);
+      return 'folder';
+    } catch (err) {
+      console.warn('[Rec] Could not write into the recordings folder, using Downloads: ' + String((err && err.message) || err));
+    }
+  }
+  const url = typeof source === 'string' ? source : URL.createObjectURL(source);
+  await chrome.downloads.download({ url, filename: `webmcp-agent/${name}`, saveAs: false });
+  // The download reads the blob asynchronously; revoke it afterwards.
+  if (typeof source !== 'string') setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return 'downloads';
+}
+
 async function stopPanelRecording() {
   const recorder = panelRecorder;
   const info = panelRecording;
@@ -2236,9 +2374,8 @@ async function stopPanelRecording() {
   }
   try {
     const { url, size } = await recorder.stop();
-    await chrome.downloads.download({ url, filename: `webmcp-agent/${info.stem}.webm`, saveAs: false });
-    console.log('[Rec] Recording saved (' + Math.round(size / 1024) + ' KB).');
-    // The download reads the blob asynchronously; revoke it afterwards.
+    const where = await saveRecordingFile(url, `${info.stem}.webm`, await resolveRecordingsDir());
+    console.log('[Rec] Recording saved to ' + where + ' (' + Math.round(size / 1024) + ' KB).');
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (err) {
     showStatus('Could not save the recording: ' + String((err && err.message) || err));
@@ -2248,9 +2385,22 @@ async function stopPanelRecording() {
 async function stopSessionRecording() {
   sessionLive = false;
   if (panelRecorder) return stopPanelRecording();
-  const reply = await chrome.runtime.sendMessage({ type: 'RECORDING_STOP' })
+  const dir = await resolveRecordingsDir();
+  const reply = await chrome.runtime.sendMessage({ type: 'RECORDING_STOP', download: !dir })
     .catch((err) => ({ success: false, error: String((err && err.message) || err) }));
-  if (!reply || !reply.success) showStatus('Could not save the recording: ' + ((reply && reply.error) || 'unknown error'));
+  if (!reply || !reply.success) {
+    showStatus('Could not save the recording: ' + ((reply && reply.error) || 'unknown error'));
+    return;
+  }
+  // With a folder the worker hands the video over instead of downloading it.
+  if (dir && reply.url) {
+    try {
+      const where = await saveRecordingFile(reply.url, `${reply.stem}.webm`, dir);
+      console.log('[Rec] Recording saved to ' + where + '.');
+    } catch (err) {
+      showStatus('Could not save the recording: ' + String((err && err.message) || err));
+    }
+  }
 }
 
 const MAX_NUDGES = 10;
@@ -2865,6 +3015,7 @@ function bindRecordingSetting(el, key, read) {
   el.addEventListener('change', () => {
     state[key] = read(el);
     chrome.storage.local.set({ [key]: state[key] });
+    if (key === 'recordSession' || key === 'recordMode') recordingDeclined = false;
     syncRecordingControls();
   });
 }
@@ -2872,10 +3023,13 @@ function syncRecordingControls() {
   const off = !state.recordSession;
   if (els.showCursorToggle) els.showCursorToggle.disabled = off;
   if (els.recordQuality) els.recordQuality.disabled = off;
+  if (els.recordMode) els.recordMode.disabled = off;
+  updateRecButton();
 }
 bindRecordingSetting(els.recordSessionToggle, 'recordSession', (el) => el.checked);
 bindRecordingSetting(els.showCursorToggle, 'showVirtualCursor', (el) => el.checked);
 bindRecordingSetting(els.recordQuality, 'recordQuality', (el) => el.value);
+bindRecordingSetting(els.recordMode, 'recordMode', (el) => el.value);
 
 els.confirmTools.addEventListener('change', () => {
   chrome.storage.local.set({ confirmTools: els.confirmTools.checked });
@@ -3120,6 +3274,7 @@ if (els.copilotCopyCodeBtn) {
     'recordSession',
     'showVirtualCursor',
     'recordQuality',
+    'recordMode',
     'resetChatOnTabSwitch',
     'catalogSourceMode',
     'catalogUrl',
@@ -3142,8 +3297,11 @@ if (els.copilotCopyCodeBtn) {
   state.recordQuality = stored.recordQuality || 'standard';
   if (els.recordSessionToggle) els.recordSessionToggle.checked = state.recordSession;
   if (els.showCursorToggle) els.showCursorToggle.checked = state.showVirtualCursor;
+  state.recordMode = stored.recordMode === 'session' ? 'session' : 'turn';
+  if (els.recordMode) els.recordMode.value = state.recordMode;
   if (els.recordQuality) els.recordQuality.value = state.recordQuality;
   syncRecordingControls();
+  renderRecordingsFolder();
   if (els.autoSuggestToggle) els.autoSuggestToggle.checked = state.autoSuggest;
   state.resetChatOnTabSwitch = Boolean(stored.resetChatOnTabSwitch);
   if (els.resetChatOnTabToggle) els.resetChatOnTabToggle.checked = state.resetChatOnTabSwitch;

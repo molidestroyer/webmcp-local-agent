@@ -379,6 +379,21 @@ lines. Two things it is easy to get wrong:
   from the service worker it has no window to anchor to and returns an empty id at once.
   The worker answers `needsPicker`; the panel picks and hands back `streamId` + `source`.
 
+- **Recording modes** (0.7.7). `state.recordMode` is `turn` (stop when the agent answers) or
+  `session` (stop only on the Rec button). Both go through `beginSessionCapture()` /
+  `endSessionCapture()`; never call `stopSessionRecording()` from `runAgent`'s `finally`
+  directly, or a continuous recording ends after the first message. `updateRecButton()` keeps
+  the button visible whenever `sessionLive`, so a recording always has a stop control. A picker
+  recording lives in the panel and cannot survive it closing.
+
+- **Where recordings are saved** (0.7.8). `chrome.downloads` prompts whenever Chrome's "Ask where
+  to save each file" is on, whatever `saveAs` says, so `lib/recordings-folder.js` lets the user
+  pick a folder once (`showDirectoryPicker`, handle in IndexedDB). Everything goes through
+  `saveRecordingFile()`, which falls back to a download: a missing permission must never lose a
+  recording. Permission can only be re-requested inside a user gesture, hence the
+  `resolveRecordingsDir()` call at the top of `beginSessionCapture()`. Don't write to the folder
+  from the service worker or the offscreen document: the handle belongs to the panel.
+
 ## Running it
 
 ```bash
