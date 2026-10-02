@@ -243,7 +243,10 @@ orden importa — lo primero que se lee pesa más:
 - `CALL THE TOOL` va **primero**. La versión hasta 0.6.23 abría con "lee los esquemas" y su
   única regla enfática era la de *esperar*.
 - Prohibir el anuncio ("I will", "let me") explícitamente, y prohibir dar algo por hecho sin
-  resultado de tool.
+  resultado de tool. **Excepción deliberada (0.7.11):** una frase corta con el *porqué*, en la
+  MISMA respuesta que la llamada y nunca sin ella. Es lo que lee la línea de objetivo del overlay
+  (`pickGoal()` en `lib/agent-goal.js`), que la muestra **entera**: recortarla ocultaba justo lo
+  que interesa. Si un modelo pequeño empieza a narrar y no llamar, el fallo está en esa regla.
 - Distinguir **preguntar por un parámetro obligatorio** de **pedir permiso**: lo segundo ya
   lo hace la casilla *Confirm every tool*, y un modelo que pide permiso parece colgado.
 - Nada de rangos sin criterio: el `wait` es **5 → 10 → 20 y parar**, dentro del `1..30` que
@@ -401,6 +404,19 @@ lines. Two things it is easy to get wrong:
   time, max 4 cards, oldest finished evicted first. The goal line (`lib/agent-goal.js`) must stay
   free: it reads what the model already emitted and falls back to a label from the tool name.
   Never add a request, or a required field, just to feed it.
+
+- **Fixed extension ID** (0.7.11). `manifest.json` carries a `key` (public half only), so the ID is
+  always `jiadmihhccjnmohgemenocmifipigolh` whatever folder an unpacked copy is loaded from. Storage is per ID, and the
+  Copilot login, settings, chats and the recordings folder handle live in it. **Never remove or
+  regenerate the key**: every user would lose that storage. `tests/manifest.test.js` guards it.
+  The private key was not kept; only the public key is needed to load unpacked. If the extension is
+  ever published on the Chrome Web Store, check how it treats a manifest `key` first.
+
+- **Overlay vs recording** (0.7.11). The tool cards and goal line depend only on
+  `state.showVirtualCursor`, never on `sessionLive`: tying them to a recording made them invisible to
+  anyone testing the chat, who then reasonably concluded they did not exist. The virtual cursor stays
+  recording-only (`setCursor`). The catalog prompt browser lists **all** rules (`browsePrompts()`), not
+  just matching ones, and labels which apply; matching has one implementation, `ruleMatches()`.
 
 ## Running it
 

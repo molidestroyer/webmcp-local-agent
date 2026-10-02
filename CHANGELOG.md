@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.11
+
+- **ID de extensión fijo.** Sin `key` en el manifest, Chrome deriva el ID de la carpeta desde la
+  que se carga una extensión desempaquetada, y `chrome.storage.local` e IndexedDB van por ID:
+  cargar otra carpeta (otra rama, otra descarga de la release) empezaba con el almacenamiento
+  vacío, sin el login de Copilot, ajustes, chats, catálogo ni carpeta de grabaciones. El
+  manifest lleva ahora una clave pública, y el ID es siempre `jiadmihhccjnmohgemenocmifipigolh`, cargues desde donde cargues.
+  **Esta versión cambia el ID una vez**: el almacenamiento de la instalación anterior no se
+  traslada, hay que volver a iniciar sesión en Copilot y a elegir la carpeta de grabaciones.
+  `tests/manifest.test.js` falla si la clave desaparece o cambia.
+- **El overlay (tarjetas de tools y línea de objetivo) se veía solo grabando.** Se dibujaba únicamente
+  con una grabación en marcha y sus ajustes estaban en gris sin ella, así que probando el chat
+  sin grabar no aparecía nada. Ahora depende solo de su ajuste, que tiene su propia tarjeta
+  *Agent Overlay* (con *Overlay position*) y viene activado por defecto; el cursor virtual y los
+  clics siguen siendo solo de la grabación.
+- **La línea de objetivo dice el porqué, entera.** Repetía la acción de la tarjeta (y recortaba a
+  10 palabras) porque el prompt prohibía al modelo escribir nada antes de llamar a una tool, y un
+  `wait` no daba ninguna pista de por qué esperaba. El prompt pide ahora UNA frase corta (menos de
+  15 palabras) con el motivo, en la misma respuesta que la llamada, y el overlay la muestra completa
+  (solo un tope de seguridad de 400 caracteres). Si el modelo no escribe nada: para `wait` se deduce
+  del paso anterior («Waiting 5s for the page to update after complete booking...»), y para el resto
+  es la petición del usuario, que se mantiene estable y no repite la tarjeta. Sin tokens extra ni
+  campos nuevos en las tools.
+- **Explorador de prompts del catálogo** (botón 📚 junto al cuadro de mensaje, solo si hay
+  prompts). Lista el catálogo entero agrupado por regla, con buscador, las reglas de la página
+  actual primero y una etiqueta *this page* / *other pages* (las reglas de otras páginas no
+  enviarían su contexto). Elegir uno lo deja en el cuadro de mensaje, sin enviar; Shift+clic lo
+  envía. `browsePrompts()` y `ruleMatches()` en `lib/catalog-service.js`: `resolveContext`
+  usa el mismo `ruleMatches`, así que ambos no pueden discrepar.
+
 ## 0.7.10
 
 - Pulsar una sugerencia (📌 del catálogo o ✨ de la IA) ya **no envía**: pone el texto en el

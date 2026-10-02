@@ -80,3 +80,44 @@ test('the demo catalog prompts are all usable', () => {
     assert.ok(prompts.every((p) => p.valid));
   }
 });
+
+test('browsing lists every rule, the ones for this page first', () => {
+  const groups = C.browsePrompts(C.DEMO_SAMPLE_CATALOG, {
+    url: 'https://x.test/app?region=es',
+    tools: [{ name: 'create_contact' }],
+  });
+  assert.deepStrictEqual(groups.map((g) => g.id), ['contacts-es', 'contacts-za', 'contacts-ca']);
+  assert.deepStrictEqual(groups.map((g) => g.matches), [true, false, false]);
+  assert.ok(groups[0].prompts.length > 0 && groups[0].hasContext);
+});
+
+test('browsing without a matching page still offers everything', () => {
+  const groups = C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { url: 'https://other.test/', tools: [] });
+  assert.strictEqual(groups.length, 3);
+  assert.ok(groups.every((g) => g.matches === false));
+});
+
+test('browsing filters by prompt text, or by rule name keeping all its prompts', () => {
+  const byText = C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { query: 'dni' });
+  assert.deepStrictEqual(byText.map((g) => g.id), ['contacts-es']);
+  assert.ok(byText[0].prompts.every((p) => /dni/i.test(p)));
+  const byRule = C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { query: 'canada' });
+  assert.deepStrictEqual(byRule.map((g) => g.id), ['contacts-ca']);
+  assert.strictEqual(byRule[0].prompts.length, C.DEMO_SAMPLE_CATALOG.rules[2].suggestedPrompts.length);
+  assert.deepStrictEqual(C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { query: 'zzz-nothing' }), []);
+});
+
+test('browsing skips unusable entries and handles an empty or missing catalog', () => {
+  const catalog = { rules: [{ id: 'a', name: 'A', suggestedPrompts: ['ok', '', 5] }, { id: 'b', name: 'B' }] };
+  assert.deepStrictEqual(C.browsePrompts(catalog)[0].prompts, ['ok']);
+  assert.strictEqual(C.browsePrompts(catalog).length, 1);
+  assert.deepStrictEqual(C.browsePrompts(null), []);
+  assert.deepStrictEqual(C.browsePrompts({ rules: [] }), []);
+});
+
+test('ruleMatches agrees with resolveContext', () => {
+  const rule = C.DEMO_SAMPLE_CATALOG.rules[1];
+  assert.strictEqual(C.ruleMatches(rule, 'https://x.test/?region=es', ['create_contact']), true);
+  assert.strictEqual(C.ruleMatches(rule, 'https://x.test/?region=es', []), false);
+  assert.strictEqual(C.ruleMatches({ id: 'x', name: 'x' }, 'https://x.test/', []), false);
+});

@@ -228,12 +228,13 @@
         .hud[data-corner^="bottom"] { bottom: 16px; }
         .hud[data-corner$="right"] { right: 16px; align-items: flex-end; }
         .hud[data-corner$="left"] { left: 16px; align-items: flex-start; }
-        .goal { display: none; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px;
+        .goal { display: none; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 16px;
           background: rgba(79,70,229,.95); color: #fff; font-weight: 600; font-size: 14px;
           box-shadow: 0 10px 25px -5px rgba(0,0,0,.5); transition: opacity .3s; }
         .goal.on { display: flex; animation: in .25s ease-out; }
         .goal.out { opacity: 0; }
-        .goal::before { content: "\\1F3AF"; }
+        .goal::before { content: "\\1F3AF"; align-self: flex-start; }
+        .goal-text { line-height: 1.3; overflow-wrap: anywhere; }
         .list { display: flex; flex-direction: column; justify-content: flex-end; gap: 8px;
           min-height: 0; overflow: hidden; } /* a tall stack gives way before the goal line does */
         .card { background: rgba(17,24,39,.92); color: #fff; border: 1px solid rgba(255,255,255,.15);

@@ -258,12 +258,27 @@
             <button id="rec-folder-clear" class="chat-header__btn" type="button" hidden>Clear</button>
           </div>
         </div>
-        <label class="setting-item" title="Draw a virtual cursor, click effects and a tool banner over the page">
+        <label class="setting-item">
+          <div class="setting-item__text">
+            <span class="setting-item__title">Quality</span>
+          </div>
+          <select id="record-quality">
+            <option value="standard">Standard (30 fps)</option>
+            <option value="high">High (30 fps, higher bitrate)</option>
+            <option value="smooth">Smooth (60 fps)</option>
+          </select>
+        </label>
+      </div>
+
+      <!-- Group: Agent overlay (works with or without a recording) -->
+      <div class="setting-card">
+        <div class="field-label">Agent Overlay</div>
+        <label class="setting-item" title="Draw the tool cards and the goal line over the page while the agent works">
           <input type="checkbox" id="show-cursor-toggle">
           <div class="setting-item__text">
-            <span class="setting-item__title">Show cursor, click animations and tool banner</span>
+            <span class="setting-item__title">Show what the agent is doing on the page</span>
             <span class="setting-item__desc">
-              Moves a visible cursor to whatever a tool clicks or fills, with a ripple on clicks and an outline on fields. A banner in the top-right corner names each tool the model calls, with its arguments, because most tools change the page without any click.
+              A card per tool call, with its arguments, and a line with the current goal. Most tools change the page without any click, so this is what makes a recording (or a live demo) readable. It shows whether or not you are recording. While recording, a virtual cursor and click effects are drawn as well.
             </span>
           </div>
         </label>
@@ -279,16 +294,6 @@
             <option value="top-left">Top left</option>
             <option value="bottom-right">Bottom right</option>
             <option value="bottom-left">Bottom left</option>
-          </select>
-        </label>
-        <label class="setting-item">
-          <div class="setting-item__text">
-            <span class="setting-item__title">Quality</span>
-          </div>
-          <select id="record-quality">
-            <option value="standard">Standard (30 fps)</option>
-            <option value="high">High (30 fps, higher bitrate)</option>
-            <option value="smooth">Smooth (60 fps)</option>
           </select>
         </label>
       </div>
@@ -420,8 +425,20 @@
       <input type="checkbox" id="confirm-tools">
       <span>Confirm every tool</span>
     </label>
+    <div id="prompt-browser" class="prompt-browser" hidden role="dialog" aria-label="Catalog prompts">
+      <div class="prompt-browser__head">
+        <input id="prompt-browser-search" type="search" placeholder="Search prompts or rules…" autocomplete="off">
+        <button id="prompt-browser-close" class="icon-btn" type="button" title="Close"><span aria-hidden="true">✕</span><span class="sr-only">Close</span></button>
+      </div>
+      <div id="prompt-browser-list" class="prompt-browser__list"></div>
+      <div class="prompt-browser__foot">Click puts the prompt in the message box. Shift+Click sends it.</div>
+    </div>
     <div class="composer__row">
       <textarea id="input" rows="1" placeholder="Type a message… (Enter sends, Shift+Enter for a new line)"></textarea>
+      <button id="catalog-browse-btn" class="icon-btn" type="button" hidden title="Browse the catalog prompts">
+        <span aria-hidden="true">📚</span>
+        <span class="sr-only">Browse catalog prompts</span>
+      </button>
       <button id="clear-chat" class="icon-btn" type="button" title="Clear the conversation">
         <span aria-hidden="true">🗑</span>
         <span class="sr-only">Clear conversation</span>
