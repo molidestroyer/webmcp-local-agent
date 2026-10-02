@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.10
+
+- Pulsar una sugerencia (📌 del catálogo o ✨ de la IA) ya **no envía**: pone el texto en el
+  cuadro de mensaje, con el cursor al final, para leerlo o editarlo antes de pulsar Send. Con
+  **Shift+clic** se envía al instante, y el ajuste *Send a suggestion as soon as it is clicked*
+  devuelve el comportamiento anterior (útil para demos). Primera fase de la vista de QA del
+  catálogo: elegir y revisar antes de ejecutar.
+- El *Rules Inspector* ahora lista los `suggestedPrompts` de cada regla (o «No suggested
+  prompts»), y marca con ⚠ las entradas que no son texto, que el esquema no validaba y que
+  llegaban a un chip como «[object Object]». Solo lectura. `listRulePrompts()` en
+  `lib/catalog-service.js`, con tests.
+
 ## 0.7.9
 
 - **El `.log` ya no recorta lo importante.** Los mensajes del usuario se guardan enteros (tope de

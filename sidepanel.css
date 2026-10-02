@@ -1307,3 +1307,11 @@ body {
 
 .setting-item__actions { display: flex; gap: 6px; flex: 0 0 auto; }
 .setting-item__actions [hidden] { display: none; }
+
+/* Prompts under a rule in the Rules Inspector (read-only). */
+.rule-card__prompts { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.rule-card__prompt { font-size: 11px; color: #93c5fd; line-height: 1.35; padding-left: 14px; position: relative; }
+.rule-card__prompt::before { content: "\1F4CC"; position: absolute; left: 0; font-size: 10px; }
+.rule-card__prompt--invalid { color: #fca5a5; }
+.rule-card__prompt--invalid::before { content: "\26A0"; }
+.rule-card__none { font-size: 11px; color: var(--text-dim); }
