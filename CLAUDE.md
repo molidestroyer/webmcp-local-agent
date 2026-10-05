@@ -539,6 +539,21 @@ lines. Two things it is easy to get wrong:
   verdict when there is an issue: it hid a booking that was never sent. Rounds that never
   answered (Stop, provider error) are pushed to the trace from `agentRounds()`'s catch.
 
+## Status bar under the composer (0.7.17)
+
+- `renderUsageBar()` is **derived** from `state.model`, `state.copilotQuota` and
+  `state.threadUsage` and is called wherever one of them changes (quota load, model change,
+  end of turn, thread load/reset). Do not write its text from one place only, or it goes
+  stale the way the catalog badge did.
+- `quotaBar()` (`lib/copilot-service.js`) draws a bar only when there is an allowance to
+  measure against. Unlimited or zero-entitlement seats get text only: a bar at 0 % or 100 %
+  would be invented.
+- `state.threadUsage` (`addTurnToThread()` in `lib/token-usage.js`) is saved as
+  `session.usage`; `resetConversation()` clears it. `ctx` is the input of the turn's last call
+  that reported usage, not a sum.
+- The quota is refreshed at panel open, around each Copilot turn, and on switching to a
+  Copilot model when older than `QUOTA_STALE_MS`. No timer: an idle panel makes no requests.
+
 ## Running it
 
 ```bash

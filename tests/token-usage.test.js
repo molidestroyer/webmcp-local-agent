@@ -40,3 +40,19 @@ test('compact numbers', () => {
   assert.strictEqual(U.compact(12345), '12k');
   assert.strictEqual(U.compact(2500000), '2.5M');
 });
+
+test('a thread adds its turns; ctx is the last call\'s input', () => {
+  assert.strictEqual(U.formatThreadUsage(null), '');
+  const t1 = U.addCall(U.addCall(U.emptyTurn(), { input: 3400, output: 135, cached: null }), { input: 3900, output: 59, cached: 0 });
+  let thread = U.addTurnToThread(null, t1, 3900);
+  assert.deepStrictEqual(thread, { input: 7300, output: 194, cached: 0, lastInput: 3900 });
+  assert.strictEqual(U.formatThreadUsage(thread), 'ctx 3.9k · thread 7.3k in · 194 out');
+
+  // A turn with nothing reported (stopped before the answer) changes nothing.
+  thread = U.addTurnToThread(thread, U.addCall(U.emptyTurn(), null), null);
+  assert.strictEqual(U.formatThreadUsage(thread), 'ctx 3.9k · thread 7.3k in · 194 out');
+
+  thread = U.addTurnToThread(thread, U.addCall(U.emptyTurn(), { input: 5200, output: 467, cached: 4900 }), 5200);
+  assert.strictEqual(U.formatThreadUsage(thread), 'ctx 5.2k · thread 13k in · 661 out');
+  assert.strictEqual(thread.cached, 4900);
+});

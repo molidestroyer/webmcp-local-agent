@@ -219,6 +219,11 @@ one line per model call with its tokens, an estimate of what the prompt was made
 prompt, catalog rules, tool schemas, conversation, tool results) and what came back. It
 carries no conversation text beyond short clips, so it can be pasted into a chat for a review.
 
+**Status bar.** Under the message box: with a Copilot model, the monthly allowance with a
+bar of what is left (amber under 20 %, red under 5 %; click for Settings); with any model,
+the open thread's tokens — `ctx` is the last call's input, i.e. what every next call
+re-reads, and `thread` the conversation's total. Saved with each thread.
+
 **Copilot balance.** Settings → GitHub Copilot shows the monthly allowance (credits left,
 used, reset date) as `api.github.com/copilot_internal/user` reports it. That endpoint is the
 one VS Code reads and is undocumented; the first query dumps its quota fields to the Logs tab.

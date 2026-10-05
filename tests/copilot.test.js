@@ -293,3 +293,31 @@ test('mergeChoices keeps text and tool calls that Copilot split across choices',
   assert.deepEqual(single.message, { role: 'assistant', content: 'Hi' });
   assert.equal(CopilotService.mergeChoices([]), null);
 });
+
+test('quotaBar: share left, colour level, and no invented bar without an allowance', () => {
+  // The real enterprise seat.
+  const real = CopilotService.quotaBar(CopilotService.parseCopilotQuota({
+    copilot_plan: 'enterprise', token_based_billing: true, quota_reset_date: '2026-11-01',
+    quota_snapshots: { premium_interactions: { entitlement: 4000, remaining: 3846, percent_remaining: 96.15, credits_used: 154 } },
+  }));
+  assert.equal(real.text, 'Copilot 3,846 / 4,000 credits · resets Nov 1');
+  assert.equal(real.level, 'ok');
+  assert.ok(Math.abs(real.percentLeft - 96.15) < 0.01);
+
+  const at = (remaining) => CopilotService.quotaBar({ unit: 'credits', entitlement: 1000, remaining, used: 1000 - remaining,
+    percentRemaining: null, unlimited: false, resetDate: null });
+  assert.equal(at(150).level, 'low');
+  assert.equal(at(40).level, 'critical');
+  assert.equal(at(-20).percentLeft, 0);
+  assert.equal(at(-20).text, 'Copilot 0 / 1,000 credits');
+
+  const unlimited = CopilotService.quotaBar({ unlimited: true, unit: 'requests', entitlement: null, remaining: null, used: null, percentRemaining: null, resetDate: null });
+  assert.deepEqual(unlimited, { text: 'Copilot · unlimited', percentLeft: null, level: null });
+
+  // Business seat reporting entitlement 0: consumption only, no bar.
+  const seat = CopilotService.quotaBar(CopilotService.parseCopilotQuota({ token_based_billing: true,
+    quota_snapshots: { premium_interactions: { entitlement: 0, remaining: 0, credits_used: 154 } } }));
+  assert.deepEqual(seat, { text: 'Copilot · 154 credits used', percentLeft: null, level: null });
+
+  assert.equal(CopilotService.quotaBar(null), null);
+});

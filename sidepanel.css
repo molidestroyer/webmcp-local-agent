@@ -754,7 +754,9 @@ body {
 
 #input {
   flex: 1 1 auto;
-  min-height: 36px;
+  /* Two lines visible at rest; autoGrow() takes it from there up to max-height. */
+  line-height: 1.4;
+  min-height: calc(2 * 1.4em + 18px);
   max-height: 160px;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -1404,3 +1406,18 @@ body {
 /* Copilot monthly allowance, under the connected state. */
 .copilot-quota-row { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; }
 .copilot-quota { flex: 1 1 auto; font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
+
+/* Status line under the composer: Copilot allowance (left) and the thread's tokens (right). */
+.usage-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 10px;
+  margin-top: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); min-width: 0; }
+.usage-bar[hidden] { display: none; }
+.usage-bar__quota { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0; border: 0;
+  background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.usage-bar__quota[hidden], .usage-bar__tokens[hidden], .usage-bar__track[hidden] { display: none; }
+.usage-bar__quota:hover { color: var(--text); }
+.usage-bar__quota > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-bar__track { flex: 0 0 56px; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.usage-bar__fill { display: block; height: 100%; background: var(--green); }
+.usage-bar__fill[data-level="low"] { background: var(--amber); }
+.usage-bar__fill[data-level="critical"] { background: var(--red); }
+.usage-bar__tokens { margin-left: auto; white-space: nowrap; }
