@@ -511,6 +511,30 @@ lines. Two things it is easy to get wrong:
   difference (`quotaSpent()`), shown only when positive: GitHub's snapshot may lag. The worker
   dumps only the quota fields to Logs, once, never the login or organisations.
 
+## Test cases, replay and the agent trace (0.7.15)
+
+- **Copilot can split one answer across `choices`** (Claude: text in one, `tool_calls` in
+  another). `mergeChoices()` in `lib/copilot-service.js` joins them. Reading `choices[0]`
+  alone drops the call whenever text comes first, and the symptoms are indirect: an extra
+  nudge per step, tokens up, and the overlay showing a tool label instead of the model's
+  sentence. The trace's `choices=N` is how to spot it.
+- **The catalog is a QA's list of test cases.** A `suggestedPrompts` entry is a string or
+  `{ title, prompt }`; `listRulePrompts()` gives every case a `title` (`caseTitle()`: first
+  line, 80 chars). `resolveContext()` returns `testCases` for the chips, and `browsePrompts()`
+  groups carry `cases`. The UI shows titles, never a whole E2E script: at most
+  `MAX_CASE_CHIPS` chips plus "All N test cases…". `demo/catalog-sample.json` and
+  `DEMO_SAMPLE_CATALOG` still must match.
+- The catalog notice in the thread and the Settings rule cards are `<details>`: the
+  `systemContext` is often a page of text and only opens on demand.
+- **`replayConversation()` redraws a saved thread**: thinking, text, and each tool call as a
+  card paired with its result (by `tool_call_id`, else the next unused one by name).
+  Synthetic nudges are skipped. Anything added to the live chat that is also stored in
+  `state.messages` needs a replay path here, or it comes back blank.
+- **The agent trace** (`lib/agent-trace.js`, pure, tested) is filled per model call in
+  `agentRounds()` (`turnWatch.rounds`) and per turn in `recordTrace()`, kept in
+  `chrome.storage.local.agentTrace` (last 20). Prompt parts are estimates (4 chars/token);
+  the totals are the provider's numbers. Keep it free of conversation text beyond clips.
+
 ## Running it
 
 ```bash

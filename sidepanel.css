@@ -740,7 +740,8 @@ body {
 
 /* Same footprint as .send-btn: both sit on the same row and should read as a
    matched pair, not one full-size action next to a shrunk-to-content one. */
-.composer__row #clear-chat {
+.composer__row #clear-chat,
+.composer__row #catalog-browse-btn {
   width: 36px;
   height: 36px;
   padding: 0;
@@ -1035,6 +1036,7 @@ body {
 }
 
 .rule-card {
+  flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--card-2);
@@ -1043,6 +1045,13 @@ body {
   flex-direction: column;
   gap: 4px;
 }
+.rule-card__head { display: flex; flex-direction: column; gap: 2px; cursor: pointer; list-style: none; }
+.rule-card__head::-webkit-details-marker { display: none; }
+.rule-card__head::before { content: "\25B8"; float: left; margin-right: 4px; color: var(--text-dim); }
+.rule-card[open] > .rule-card__head::before { content: "\25BE"; }
+.rule-card__meta { font-size: 10.5px; color: var(--text-dim); }
+.rule-card__ctx-box > summary { font-size: 11px; color: var(--text-dim); cursor: pointer; margin: 4px 0 2px; }
+.rule-card[open] { gap: 6px; }
 
 .rule-card__title {
   font-weight: 600;
@@ -1057,6 +1066,9 @@ body {
 }
 
 .rule-card__ctx {
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow-y: auto;
   font-size: 11px;
   color: var(--text);
   background: #10101c;
@@ -1373,7 +1385,14 @@ body {
   border: 1px solid var(--border); border-radius: 6px; background: #10101c; color: var(--text); }
 .prompt-item:hover { border-color: var(--accent); background: var(--accent-soft); }
 /* E2E prompts are whole scripts: keep their lines, show the start, the full text is in the title. */
-.prompt-item { white-space: pre-line; flex: 0 0 auto; }
+.prompt-item { white-space: pre-line; flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; }
+.prompt-item__title { font-weight: 600; color: var(--text); }
+.prompt-item__preview { color: var(--text-dim); font-size: 11px; }
+.chip-suggestion--more { border-style: dashed; color: var(--text-dim); }
+/* The catalog notice in the thread: one line, the rules fold away. */
+.catalog-note { align-self: stretch; text-align: left; }
+.catalog-note summary { cursor: pointer; }
+.catalog-note__body { margin-top: 4px; white-space: pre-wrap; font-size: 11px; color: var(--text-dim); }
 .prompt-browser__scope-note { font-size: 10px; color: var(--text-dim); }
 .prompt-browser__error { color: #fca5a5; }
 .scope-btn { flex: 0 0 auto; font: inherit; font-size: 11px; padding: 4px 8px; border-radius: 999px; cursor: pointer;

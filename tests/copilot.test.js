@@ -275,3 +275,21 @@ test('parseCopilotQuota: placeholder snapshots are skipped, Free plan reads limi
   const free = CopilotService.parseCopilotQuota({ copilot_plan: 'free', limited_user_quotas: { chat: 30 }, monthly_quotas: { chat: 50 } });
   assert.equal(CopilotService.formatCopilotQuota(free), '30 of 50 chat messages left (60%) · used 20');
 });
+
+test('mergeChoices keeps text and tool calls that Copilot split across choices', () => {
+  // Claude via Copilot: the sentence in one choice, the call in the next.
+  const merged = CopilotService.mergeChoices([
+    { finish_reason: 'stop', message: { role: 'assistant', content: 'Opening the booking form.' } },
+    { finish_reason: 'tool_calls', message: { role: 'assistant', content: null,
+      tool_calls: [{ id: 'c1', type: 'function', function: { name: 'start_booking', arguments: '{}' } }] } },
+  ]);
+  assert.equal(merged.count, 2);
+  assert.equal(merged.finishReason, 'tool_calls');
+  assert.equal(merged.message.content, 'Opening the booking form.');
+  assert.equal(merged.message.tool_calls.length, 1);
+  assert.equal(CopilotService.extractToolCalls(merged.message)[0].function.name, 'start_booking');
+
+  const single = CopilotService.mergeChoices([{ finish_reason: 'stop', message: { content: 'Hi' } }]);
+  assert.deepEqual(single.message, { role: 'assistant', content: 'Hi' });
+  assert.equal(CopilotService.mergeChoices([]), null);
+});

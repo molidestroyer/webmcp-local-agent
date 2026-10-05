@@ -214,6 +214,11 @@ the part of the prompt it could not reuse from its cache). With a Copilot model 
 the turn cost in AI credits, measured as the change in your monthly balance. Suggestions and
 ✨ titles are separate requests and are not included.
 
+**Agent trace.** Logs → 🧭 *Copy agent trace* copies a compact summary of the last 20 turns:
+one line per model call with its tokens, an estimate of what the prompt was made of (system
+prompt, catalog rules, tool schemas, conversation, tool results) and what came back. It
+carries no conversation text beyond short clips, so it can be pasted into a chat for a review.
+
 **Copilot balance.** Settings → GitHub Copilot shows the monthly allowance (credits left,
 used, reset date) as `api.github.com/copilot_internal/user` reports it. That endpoint is the
 one VS Code reads and is undocumented; the first query dumps its quota fields to the Logs tab.

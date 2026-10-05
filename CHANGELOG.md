@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.7.15
+
+- **Copilot + Claude: el texto y la llamada venían en `choices` distintas.** Solo se leía
+  `choices[0]`, así que cuando el modelo escribía su frase («Iniciando el formulario de
+  reserva…») la llamada se perdía: el panel mostraba la frase, el bucle no veía tool, empujaba
+  al modelo, y la ronda siguiente llamaba a la tool sin texto. Por eso el vídeo enseñaba la
+  etiqueta de la tool en vez de la frase, y cada empujón era una ronda (y tokens) de más.
+  `mergeChoices()` junta texto y `tool_calls` de todas las `choices`, como hace
+  `ericc-ch/copilot-api`.
+- **El catálogo es una lista de test cases.** Cada entrada de `suggestedPrompts` puede ser
+  `{ "title": "...", "prompt": "..." }`; un texto suelto toma su primera línea como título.
+  Sobre el compositor salen como mucho 3 casos por su título (🧪) y un «All N test cases…»;
+  el navegador (botón 🧪) lista título + inicio del prompt. El catálogo de ejemplo trae títulos.
+- **Aviso del catálogo en el hilo: una línea.** Las reglas se despliegan si se pide, en vez de
+  volcar todo el `systemContext` en el chat.
+- **Ajustes → Catalog**: cada regla es una tarjeta plegada (nombre, URL, nº de casos); las
+  reglas de negocio y los casos se abren a demanda.
+- **El botón del catálogo tiene el tamaño de los otros** (36×36; solo 🗑 tenía la regla).
+- **Reabrir un hilo lo pinta como estaba**: razonamiento plegado, texto del modelo y cada tool
+  como su tarjeta con su resultado. Antes cada mensaje era una burbuja suelta: una respuesta
+  que solo era razonamiento o solo llamadas salía en blanco, y los empujones internos
+  aparecían como si los hubieras escrito tú.
+- **Traza del agente** (Logs → 🧭 *Copy agent trace*): una línea por llamada al modelo con
+  sus tokens, de qué estaba hecho el prompt (system, catálogo, esquemas, historial,
+  resultados), cuántas `choices` llegaron y qué devolvió. Últimos 20 turnos, sobrevive a
+  cerrar el panel, y cabe en un mensaje para revisarla.
+
 ## 0.7.14
 
 - **Informe de cada turno.** Bajo cada respuesta, una tarjeta con el veredicto calculado por

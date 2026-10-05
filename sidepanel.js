@@ -172,6 +172,7 @@ const els = {
   // logs
   logsOutput: document.getElementById('logs-output'),
   logsCopyBtn: document.getElementById('logs-copy-btn'),
+  traceCopyBtn: document.getElementById('trace-copy-btn'),
   logsClearBtn: document.getElementById('logs-clear-btn'),
   // tools
   toolsList: document.getElementById('tools-list'),
@@ -240,6 +241,7 @@ const state = {
   announcedContext: null,
   copilotConnected: false,
   copilotQuota: null,
+  agentTrace: [],
   copilotModels: [],
   copilotDeviceCode: null,
   copilotDeviceExpiresAt: 0,
@@ -321,6 +323,7 @@ function renderMarkdown(container, text) {
 const S = globalThis.__WebMCPLocalAgentSchema;
 const U = globalThis.__WebMCPTokenUsage;
 const TR = globalThis.__WebMCPTurnReport;
+const AT = globalThis.__WebMCPAgentTrace;
 const R = globalThis.__WebMCPRecorder;
 const tokens = S.tokens;
 const humanize = S.humanize;
@@ -643,8 +646,12 @@ function renderCatalogRulesInspector() {
   }
 
   for (const rule of rules) {
-    const card = document.createElement('div');
+    // Folded by default: a catalog is a list of test suites, read by name first. The
+    // business rules (often a page of text) and the cases open on demand.
+    const card = document.createElement('details');
     card.className = 'rule-card';
+    const head = document.createElement('summary');
+    head.className = 'rule-card__head';
 
     const title = document.createElement('div');
     title.className = 'rule-card__title';
@@ -658,27 +665,44 @@ function renderCatalogRulesInspector() {
       : '';
     match.textContent = [urlPat, reqTools].filter(Boolean).join(' | ') || 'No filter criteria';
 
-    const ctx = document.createElement('div');
-    ctx.className = 'rule-card__ctx';
-    ctx.textContent = rule.systemContext || 'No business rules (systemContext)';
-
-    card.append(title, match, ctx);
-
     const prompts = C.listRulePrompts(rule);
+    const invalid = prompts.filter((p) => !p.valid).length;
+    const meta = document.createElement('div');
+    meta.className = 'rule-card__meta';
+    meta.textContent = (prompts.length === 1 ? '1 test case' : prompts.length + ' test cases')
+      + (invalid ? ` \u00b7 ${invalid} not usable` : '')
+      + (rule.systemContext ? ' \u00b7 business rules' : '');
+    head.append(title, match, meta);
+    card.appendChild(head);
+
+    if (rule.systemContext) {
+      const ctxBox = document.createElement('details');
+      ctxBox.className = 'rule-card__ctx-box';
+      const ctxHead = document.createElement('summary');
+      const lines = String(rule.systemContext).split('\n').filter((l) => l.trim()).length;
+      ctxHead.textContent = `Business rules sent to the model (${lines} line${lines === 1 ? '' : 's'})`;
+      const ctx = document.createElement('div');
+      ctx.className = 'rule-card__ctx';
+      ctx.textContent = rule.systemContext;
+      ctxBox.append(ctxHead, ctx);
+      card.appendChild(ctxBox);
+    }
+
     if (prompts.length) {
       const list = document.createElement('ul');
       list.className = 'rule-card__prompts';
       for (const prompt of prompts) {
         const item = document.createElement('li');
         item.className = 'rule-card__prompt' + (prompt.valid ? '' : ' rule-card__prompt--invalid');
-        item.textContent = prompt.valid ? prompt.text : `Not usable as a prompt: ${prompt.text || '(empty)'}`;
+        item.textContent = prompt.valid ? prompt.title : `Not usable as a test case: ${prompt.text || '(empty)'}`;
+        item.title = prompt.text;
         list.appendChild(item);
       }
       card.appendChild(list);
     } else {
       const none = document.createElement('div');
       none.className = 'rule-card__none';
-      none.textContent = 'No suggested prompts';
+      none.textContent = 'No test cases';
       card.appendChild(none);
     }
     els.catalogRulesList.appendChild(card);
@@ -861,15 +885,26 @@ function renderPromptBrowser() {
         : 'This rule does not apply to the current tab, so its business rules will not be sent with the prompt.';
     title.append(name, badge);
     box.appendChild(title);
-    for (const text of group.prompts) {
+    // One row per test case: its title, and the start of the prompt under it.
+    for (const testCase of group.cases || group.prompts.map((text) => ({ title: C.caseTitle(text), text }))) {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'prompt-item';
-      item.textContent = previewLines(text, 6);
-      item.title = text;
+      const caseName = document.createElement('span');
+      caseName.className = 'prompt-item__title';
+      caseName.textContent = '\u{1F9EA} ' + testCase.title;
+      item.appendChild(caseName);
+      const preview = previewLines(testCase.text, 2);
+      if (preview && preview !== testCase.title) {
+        const body = document.createElement('span');
+        body.className = 'prompt-item__preview';
+        body.textContent = preview;
+        item.appendChild(body);
+      }
+      item.title = testCase.text;
       item.addEventListener('click', (event) => {
         closePromptBrowser();
-        useSuggestion(text, event);
+        useSuggestion(testCase.text, event);
       });
       box.appendChild(item);
     }
@@ -942,6 +977,8 @@ function chipHint() {
     : 'Click to put it in the message box. Shift+Click to send straight away.';
 }
 
+const MAX_CASE_CHIPS = 3;
+
 function renderSuggestions() {
   if (!els.suggestionsChips) return;
   els.suggestionsChips.textContent = '';
@@ -965,16 +1002,26 @@ function renderSuggestions() {
   if (els.suggestions) els.suggestions.hidden = false;
   if (els.suggestionsLoading) els.suggestionsLoading.hidden = !state.suggesting;
 
-  // Static prompts from Catalog (blue chip)
+  // The catalog's test cases for this page (blue chips): their short titles, a few at most,
+  // and one chip that opens the full list. Whole E2E scripts never sit above the composer.
   if (hasStatic) {
-    for (const text of state.staticSuggestions) {
+    for (const testCase of state.staticSuggestions.slice(0, MAX_CASE_CHIPS)) {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'chip-suggestion chip-suggestion--static';
-      chip.textContent = '📌 ' + chipLabel(text);
-      chip.title = chipTitle(text);
-      chip.addEventListener('click', (event) => useSuggestion(text, event));
+      chip.textContent = '\u{1F9EA} ' + testCase.title;
+      chip.title = chipTitle(testCase.text);
+      chip.addEventListener('click', (event) => useSuggestion(testCase.text, event));
       els.suggestionsChips.appendChild(chip);
+    }
+    if (state.staticSuggestions.length > MAX_CASE_CHIPS) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'chip-suggestion chip-suggestion--more';
+      more.textContent = 'All ' + state.staticSuggestions.length + ' test cases\u2026';
+      more.title = 'Open the test case list for this page';
+      more.addEventListener('click', () => openPromptBrowser());
+      els.suggestionsChips.appendChild(more);
     }
   }
 
@@ -1203,7 +1250,7 @@ async function detectPageTools() {
       const resolved = C.resolveContext(tabUrl, state.tools, state.catalogData);
       state.activeSystemContext = resolved.systemContext;
       state.activeRuleNames = (resolved.matchedRules || []).map((r) => r.name || r.id || 'rule');
-      state.staticSuggestions = resolved.suggestedPrompts;
+      state.staticSuggestions = resolved.testCases || [];
     } else {
       state.activeSystemContext = '';
       state.activeRuleNames = [];
@@ -1885,8 +1932,19 @@ function renderCatalogActive() {
   if (signature === state.announcedContext) return;
   state.announcedContext = signature;
   if (!signature || state.tab !== 'chat') return;
-  addMessage('note', 'Catalog rules for this page are now part of every message:\n'
-    + state.activeSystemContext);
+  // One line in the thread; the rules themselves fold away (they can be long).
+  clearEmptyState();
+  const note = document.createElement('details');
+  note.className = 'msg msg--note catalog-note';
+  const summary = document.createElement('summary');
+  summary.textContent = '\u{1F4D5} Catalog rules active: ' + (state.activeRuleNames || []).join(', ')
+    + ' \u2014 sent with every message';
+  const body = document.createElement('div');
+  body.className = 'catalog-note__body';
+  body.textContent = state.activeSystemContext;
+  note.append(summary, body);
+  els.chat.appendChild(note);
+  scrollToBottom();
 }
 
 /** Shared by the 🗑 button and the "reset on tab switch" setting. */
@@ -2396,7 +2454,7 @@ async function copilotChat(messages, tools, onChunk, { signal, onUsage } = {}) {
     endpointUrl,
     signal,
   });
-  if (onUsage) onUsage(U.fromOpenAI(result && result.usage));
+  if (onUsage) onUsage(U.fromOpenAI(result && result.usage), { choices: (result && result.choices) || 1 });
 
   if (result && result.message && result.message.content) {
     onChunk('text', result.message.content);
@@ -2888,9 +2946,32 @@ async function turnQuotaText(before) {
     : amount + ' premium request(s)';
 }
 
+/** Characters of the system message that came from the catalog, for the trace's split. */
+function catalogChars() {
+  return state.activeSystemContext ? systemMessageContent().length - SYSTEM_PROMPT.length : 0;
+}
+
+/** One turn into the agent trace (lib/agent-trace.js), kept across panel restarts. */
+function recordTrace(watch, report, end) {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  state.agentTrace = AT.appendTurn(state.agentTrace, {
+    at: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`,
+    model: state.model,
+    request: lastUserRequest(),
+    end,
+    verdict: report.level + ' "' + report.title + '"',
+    nudges: watch.nudges,
+    tools: watch.tools.length,
+    pageErrors: watch.pageErrors.filter((e) => e.level !== 'warn').length,
+    rounds: watch.rounds,
+  });
+  chrome.storage.local.set({ agentTrace: state.agentTrace }).catch(() => {});
+}
+
 async function runAgentLoop(signal) {
   const turn = U.emptyTurn();
-  turnWatch = { tabId: state.tabId, tools: [], pageErrors: [] };
+  turnWatch = { tabId: state.tabId, tools: [], pageErrors: [], rounds: [], nudges: 0 };
   // Copilot bills credits per token: the balance before and after the turn is what it really
   // cost. Asked in parallel, so it never delays the first model call.
   const quotaBefore = state.model.startsWith('copilot:') ? loadCopilotQuota().catch(() => null) : null;
@@ -2919,6 +3000,7 @@ async function runAgentLoop(signal) {
     console.log('[Agent] Turn report: ' + TR.formatReport(report).replace(/\n\s*/g, ' | ')
       + (usageText ? ' | tokens: ' + usageText : ''));
     logSession('internal', 'turn report: ' + TR.formatReport(report));
+    recordTrace(watch, report, end);
     if (usageText) logSession('internal', 'tokens: ' + usageText);
   }
 }
@@ -2932,6 +3014,7 @@ async function agentRounds(signal, turn) {
   let lastRound = [];
   let nudges = 0;
   let previousTool = ''; // the step before the one being announced: why a `wait` waits
+  let afterNudge = false; // the next model call answers a nudge, for the trace
   for (let step = 0; step < maxSteps; step++) {
     // After a tool ran, the page may still be mounting the next view.
     if (lastRound.length) await settleTools(signal);
@@ -2943,7 +3026,10 @@ async function agentRounds(signal, turn) {
     const bubble = createAssistantBubble();
     let reply;
     let usage = null;
-    const options = { signal, onUsage: (u) => { usage = u; } };
+    let choices = 1;
+    const options = { signal, onUsage: (u, meta) => { usage = u; choices = (meta && meta.choices) || 1; } };
+    const parts = AT.measurePrompt(state.messages, tools, catalogChars());
+    const roundStarted = performance.now();
     try {
       if (isCopilot) {
         reply = await copilotChat(state.messages, tools, (kind, delta) => bubble.append(kind, delta), options);
@@ -2960,6 +3046,11 @@ async function agentRounds(signal, turn) {
       return 'provider-error';
     }
     U.addCall(turn, usage);
+    if (turnWatch) {
+      turnWatch.rounds.push({ ms: Math.round(performance.now() - roundStarted), usage, parts, choices,
+        nudge: afterNudge, reply: AT.describeReply(reply) });
+    }
+    afterNudge = false;
 
     bubble.finish(reply);
     state.messages.push(reply);
@@ -2973,6 +3064,8 @@ async function agentRounds(signal, turn) {
         return 'answered';
       }
       nudges++;
+      afterNudge = true;
+      if (turnWatch) turnWatch.nudges = nudges;
       console.log('[Agent] Nudge ' + nudges + '/' + MAX_NUDGES + ' after round ' + (step + 1) + ': multi-step request, last round succeeded, reply had no question and no tool call.');
       logSession('internal', `nudge ${nudges}/${MAX_NUDGES}: asked the model to continue after round ${step + 1}`);
       state.messages.push({ role: 'user', synthetic: true, content: NUDGE_TEXT });
@@ -3375,6 +3468,51 @@ function saveCurrentChatSession() {
   renderChatHeader();
 }
 
+/**
+ * Redraws a saved thread the way it looked live: reasoning folded, the model's text, and
+ * each tool call as its card with the result that answered it. It used to print every
+ * message as a plain bubble, so a reply that was only reasoning or only tool calls came
+ * back blank, tool results appeared as loose text and the internal nudges showed up as
+ * if the user had typed them. Turn reports and token lines are not stored, so they do
+ * not come back.
+ */
+function replayConversation(messages) {
+  const list = messages || [];
+  const answered = new Set();
+  for (let i = 0; i < list.length; i++) {
+    const m = list[i];
+    if (!m || m.role === 'system' || m.synthetic) continue;
+    if (m.role === 'user') {
+      addMessage('user', m.content);
+    } else if (m.role === 'assistant') {
+      if (m.thinking || m.content) {
+        const bubble = createAssistantBubble();
+        if (m.thinking) bubble.append('thinking', m.thinking);
+        if (m.content) bubble.append('content', m.content);
+        bubble.finish({ content: m.content || '' });
+      }
+      const calls = Array.isArray(m.tool_calls) ? m.tool_calls : [];
+      for (const call of calls) {
+        const fn = call.function || {};
+        const card = createToolCard(fn.name || '(unnamed)', parseArguments(fn.arguments));
+        // The result that answered this call: by id (Copilot), else the next unused one by name.
+        const j = list.findIndex((r, k) => k > i && !answered.has(k) && r && r.role === 'tool'
+          && (call.id ? r.tool_call_id === call.id : r.tool_name === fn.name));
+        if (j < 0) { card.cancelled('No result was saved for this call.'); continue; }
+        answered.add(j);
+        const text = String(list[j].content || '');
+        if (/^Error:/.test(text)) card.fail(text.replace(/^Error:\s*/, ''));
+        else if (/^(The user (cancelled|stopped)|Not run:)/.test(text)) card.cancelled(text);
+        else card.done(text);
+      }
+    } else if (m.role === 'tool') {
+      if (!answered.has(i)) addMessage('note', 'Tool result: ' + String(m.content || '').slice(0, 300));
+    } else {
+      addMessage(m.role, m.content);
+    }
+  }
+}
+
 function loadChatSession(session) {
   if (session.id !== state.currentSessionId && blockThreadSwitch()) return;
   if (session.id !== state.currentSessionId) logSession('chat', 'Switched to thread "' + (session.title || 'Untitled') + '".');
@@ -3382,9 +3520,7 @@ function loadChatSession(session) {
   state.messages = [...session.messages];
 
   els.chat.textContent = '';
-  for (const m of session.messages) {
-    if (m.role !== 'system') addMessage(m.role, m.content);
-  }
+  replayConversation(session.messages);
 
   renderChatHeader();
   setChatSubView('chat');
@@ -3870,9 +4006,11 @@ if (els.copilotCopyCodeBtn) {
     'catalogSyncedAt',
     'webmcp_catalog_cache',
     'chatSessions',
+    'agentTrace',
   ]);
 
   state.chatSessions = Array.isArray(stored.chatSessions) ? stored.chatSessions : [];
+  state.agentTrace = Array.isArray(stored.agentTrace) ? stored.agentTrace : [];
   els.confirmTools.checked = Boolean(stored.confirmTools);
   state.autoSuggest = Boolean(stored.autoSuggest);
   state.limitRounds = stored.limitRounds !== false;
@@ -3976,6 +4114,20 @@ console.error = function (...args) {
   const msg = args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
   appendLog('ERROR', msg);
 };
+
+if (els.traceCopyBtn) {
+  els.traceCopyBtn.addEventListener('click', async () => {
+    const text = AT.formatTrace(state.agentTrace) || 'No agent turns recorded yet.';
+    try {
+      await navigator.clipboard.writeText(text);
+      els.traceCopyBtn.textContent = '\u2714 Copied!';
+    } catch (_) {
+      appendLog('INFO', 'Agent trace:\n' + text);
+      els.traceCopyBtn.textContent = 'Shown below';
+    }
+    setTimeout(() => { if (els.traceCopyBtn) els.traceCopyBtn.textContent = '\u{1F9ED} Copy agent trace'; }, 1600);
+  });
+}
 
 if (els.logsCopyBtn) {
   els.logsCopyBtn.addEventListener('click', () => {
