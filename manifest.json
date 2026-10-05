@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "WebMCP Local Agent",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx99cEy75Pi5po9MyNhLbItlG/ANEq5Ubgzr30sJAY8igYkxiZVBTEU1b1abfqiJbj33rEmvcSvxDklthA8sZMS9R6sjTVEclFmO8ZMCRS5FMkH8+tLNAbBpq6WVavw7WpWbmfrOLBR1mDk9PHpw25k36E5etP5P59TBzkSs719ss3KacG3kVgC+8aOSTtm/gioFysrMDVPnfb24LO0S3B5OcvmqKyPPlA3gkFWJ/IeSK+/jvyVZ6Ls9DvPfBjXry3lNpxS816ljlf2/muxP6sjIkh4T/UEOL34wQIxrsr/Qq/L8g1wyeh5mBZuRKGiP1pvvZNBrW+LlTRchHuxuH+QIDAQAB",
-  "version": "0.7.14",
+  "version": "0.7.15",
   "description": "Chat with local Ollama and let it call the WebMCP tools exposed by the active page.",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "activeTab", "scripting", "storage", "tabs", "webNavigation", "tabCapture", "offscreen", "downloads", "desktopCapture"],

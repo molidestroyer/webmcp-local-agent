@@ -64,12 +64,36 @@ test('returns empty context when no rules match', () => {
 
 test('lists a rule\'s prompts and flags entries that are not usable text', () => {
   const rule = { id: 'r', name: 'R', suggestedPrompts: ['Create a contact', '', 42, { a: 1 }] };
-  assert.deepStrictEqual(C.listRulePrompts(rule), [
+  assert.deepStrictEqual(C.listRulePrompts(rule).map(({ text, valid }) => ({ text, valid })), [
     { text: 'Create a contact', valid: true },
     { text: '', valid: false },
     { text: '42', valid: false },
     { text: '{"a":1}', valid: false },
   ]);
+});
+
+test('a test case is a prompt string or { title, prompt }, with a short title either way', () => {
+  const long = 'Act as my travel assistant and complete the booking step by step:\n\n1. Search Paris';
+  const rule = { id: 'r', name: 'R', match: { urlPattern: 'x\\.test' }, suggestedPrompts: [
+    { title: 'TC-01 · Full booking', prompt: long },
+    long,
+    { title: 'no prompt' },
+    'x'.repeat(200),
+  ] };
+  const cases = C.listRulePrompts(rule);
+  assert.deepStrictEqual(cases[0], { title: 'TC-01 · Full booking', text: long, valid: true });
+  assert.strictEqual(cases[1].title, 'Act as my travel assistant and complete the booking step by step:');
+  assert.strictEqual(cases[2].valid, false);
+  assert.strictEqual(cases[3].title.length, 80);
+  assert.ok(cases[3].title.endsWith('\u2026'));
+
+  const resolved = C.resolveContext('https://x.test/', ['t'], { rules: [rule] });
+  assert.deepStrictEqual(resolved.testCases.map((c) => c.title), ['TC-01 · Full booking', cases[3].title]);
+  // The same prompt under two entries is one case.
+  assert.strictEqual(resolved.suggestedPrompts.length, 2);
+  // Search sees the title, and a group carries its cases.
+  const groups = C.browsePrompts({ rules: [rule] }, { query: 'TC-01' });
+  assert.deepStrictEqual(groups[0].cases.map((c) => c.title), ['TC-01 · Full booking']);
 });
 
 test('a rule without prompts lists none', () => {
