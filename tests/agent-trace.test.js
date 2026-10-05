@@ -48,3 +48,13 @@ test('the trace keeps the last turns only, numbered', () => {
   assert.strictEqual(turns.length, T.MAX_TURNS);
   assert.strictEqual(turns[turns.length - 1].n, T.MAX_TURNS + 5);
 });
+
+test('a call cut by Stop is a line of its own, not a missing call', () => {
+  const turns = T.appendTurn([], {
+    at: '12:37', model: 'gemma4:e2b', request: 'Book', verdict: 'warn "Stopped by you"', nudges: 0, tools: 0,
+    rounds: [{ ms: 12300, usage: null, parts: { sys: 600, cat: 650, tools: 460, hist: 270, res: 0 }, reply: 'stopped before the answer', choices: 1 }],
+  });
+  const lines = T.formatTrace(turns).split('\n');
+  assert.match(lines[0], /\| 1 call\(s\) \(1 unanswered\), 0 nudge\(s\)/);
+  assert.match(lines[1], /^ {2}r1 12\.3s in \? out \? .* -> stopped before the answer$/);
+});

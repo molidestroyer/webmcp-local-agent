@@ -63,3 +63,39 @@ test('an answer with no page tool says nothing backs it', () => {
   assert.strictEqual(r.level, 'info');
   assert.match(r.items.join('\n'), /No page tool ran/);
 });
+
+test('a question never hides a problem: the worst issue is the title, the question a suffix', () => {
+  // The real hotel run: the form was filled, not sent, and the model asked the user to confirm.
+  const r = R.buildTurnReport({ end: 'answered', reply: '¿Quieres que pulse Confirm Reservation?',
+    tools: [ok('search_location'), ok('start_booking'), ok('complete_booking', 'Fields filled in but NOT submitted: this form waits for the user.')] });
+  assert.strictEqual(r.level, 'warn');
+  assert.strictEqual(r.title, 'Not submitted: complete_booking · waiting for you');
+
+  const errs = R.buildTurnReport({ end: 'answered', reply: 'Which date?', tools: [ok('a')],
+    pageErrors: [{ level: 'error', text: 'x' }, { level: 'error', text: 'y' }] });
+  assert.strictEqual(errs.title, '2 page error(s) · waiting for you');
+});
+
+test('a failure names the tool and the reason in the title', () => {
+  const r = R.buildTurnReport({ end: 'answered', reply: 'Done', tools: [ok('search'), bad('save', 'Error: 429 rate limit exceeded, retry in 30s')] });
+  assert.strictEqual(r.level, 'fail');
+  assert.strictEqual(r.title, 'Failed: save — 429 rate limit exceeded, retry in 30s');
+
+  const two = R.buildTurnReport({ end: 'answered', reply: 'Done', tools: [bad('a', 'x'), bad('b', 'y'), ok('c')] });
+  assert.strictEqual(two.title, 'Failed: a — x (+1 more)');
+
+  const recovered = R.buildTurnReport({ end: 'answered', reply: 'Saved.', tools: [bad('save'), ok('save')] });
+  assert.strictEqual(recovered.title, 'Recovered from 1 failure(s)');
+
+  // Severity, not order: a failure outranks an unsubmitted form found earlier.
+  const mixed = R.buildTurnReport({ end: 'answered', reply: 'Done', tools: [ok('f', 'NOT submitted'), bad('pay', 'card declined')] });
+  assert.strictEqual(mixed.level, 'fail');
+  assert.strictEqual(mixed.title, 'Failed: pay — card declined (+1 more)');
+});
+
+test('the round limit and Stop keep their own titles', () => {
+  assert.strictEqual(R.buildTurnReport({ end: 'limit', limit: 100, tools: [ok('a')] }).title, 'Round limit reached (100)');
+  const stopped = R.buildTurnReport({ end: 'stopped', tools: [{ name: 'wait', ok: false, note: 'STOPPED' }] });
+  assert.strictEqual(stopped.title, 'Stopped by you');
+  assert.strictEqual(stopped.level, 'warn');
+});

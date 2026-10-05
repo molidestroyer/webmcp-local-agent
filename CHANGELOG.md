@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.16
+
+- **El veredicto lo marca el problema más grave, y el título lo nombra.** Una pregunta del
+  modelo ya no tapa un problema: el flujo del hotel, con el formulario sin enviar y el modelo
+  pidiendo confirmar, decía 💬 *Waiting for your answer*; ahora dice ⚠️ *Not submitted:
+  complete_booking · waiting for you*. Un fallo dice cuál y por qué (*Failed: save — 429 rate
+  limit exceeded…*), y el resto de problemas suma *(+N more)*. Orden: proveedor caído / límite
+  de rondas / fallo sin recuperar (❌) → Stop / no enviado / errores de la página / cancelado /
+  fallo recuperado (⚠️).
+- **Las llamadas cortadas con Stop salen en la traza.** Antes un turno parado antes de que el
+  modelo contestara aparecía como «0 call(s)»; ahora es `1 call(s) (1 unanswered)` con su
+  línea `r1 12.3s … -> stopped before the answer`, y lo mismo con un error del proveedor.
+
 ## 0.7.15
 
 - **Copilot + Claude: el texto y la llamada venían en `choices` distintas.** Solo se leía
