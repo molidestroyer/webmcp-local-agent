@@ -506,8 +506,56 @@ async function getOrRefreshCopilotToken(forceRefresh = false) {
   return { token, oauthToken, expires_at: expiresAt, endpoints };
 }
 
+/**
+ * The monthly Copilot allowance, from the endpoint VS Code reads. It wants the GitHub OAuth
+ * token (`token gho_...`), not the exchanged Copilot session token. Only the quota fields are
+ * dumped to the Logs tab, once per panel session: the response also carries the login and
+ * organisation names, which have no business in a log.
+ */
+let quotaDumped = false;
+async function fetchCopilotQuota() {
+  const { github_oauth_token: oauthToken } = await chrome.storage.local.get('github_oauth_token');
+  if (!oauthToken) throw new Error('Copilot is not connected.');
+  const headers = (auth) => ({
+    'Authorization': auth,
+    'Editor-Version': 'vscode/1.96.2',
+    // The headers Win-CodexBar and CodexBar send to this endpoint.
+    'Editor-Plugin-Version': 'copilot-chat/0.26.7',
+    'User-Agent': 'GitHubCopilotChat/0.26.7',
+    'X-Github-Api-Version': '2025-04-01',
+    'Accept': 'application/json',
+  });
+  let res = await fetch('https://api.github.com/copilot_internal/user', { headers: headers(`token ${oauthToken}`) });
+  if (!res.ok) {
+    const bearer = await fetch('https://api.github.com/copilot_internal/user', { headers: headers(`Bearer ${oauthToken}`) });
+    if (bearer.ok) res = bearer;
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    diag('WARN', 'copilot_internal/user responded ' + res.status + ': ' + text.slice(0, 200));
+    throw new Error('GitHub answered ' + res.status + ' for the Copilot quota.');
+  }
+  const data = await res.json();
+  if (!quotaDumped) {
+    quotaDumped = true;
+    const { copilot_plan, access_type_sku, token_based_billing, quota_reset_date, quota_reset_date_utc,
+      quota_snapshots, monthly_quotas, limited_user_quotas } = data || {};
+    diag('INFO', 'copilot_internal/user quota fields: ' + JSON.stringify({ copilot_plan, access_type_sku,
+      token_based_billing, quota_reset_date, quota_reset_date_utc, quota_snapshots, monthly_quotas,
+      limited_user_quotas }).slice(0, 2000));
+  }
+  return data;
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message) return undefined;
+
+  if (message.type === 'COPILOT_QUOTA') {
+    fetchCopilotQuota()
+      .then((raw) => sendResponse({ success: true, raw }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 
   if (message.type === 'bridge') {
     bridge(message.tabId, message.action, message.payload).then((answer) => {

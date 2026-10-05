@@ -461,6 +461,56 @@ lines. Two things it is easy to get wrong:
   polyfill. Downloads vanish when the context closes, so copy them first. Run it after touching
   the agent loop, page-hook execution, the overlay or recording.
 
+## Stop and token usage (0.7.13)
+
+- **Stop is the Send button.** `agentAbort` (an `AbortController`, declared near
+  `updateSendState()` so the first render does not hit its TDZ) exists only while a turn
+  runs, and its presence is what turns ➤ into ■. Its signal reaches `ollamaChat`,
+  `copilotChat` → `chatCompletion` (which must rethrow on abort instead of trying the next
+  fallback URL), `settleTools`, the `wait` tool (`sleep()`) and `card.confirm()`.
+- **A page tool cannot be cancelled**: `runToolCall` races `executeOnPage` against
+  `whenAborted()` and says the tool *may* have completed. Never claim it was undone.
+- **Every `tool_call` gets a result, even after Stop.** Calls a Stop skipped get
+  `STOPPED_BEFORE_CALL` through `toolResultMessage()`. Leave one unanswered and Copilot
+  rejects the whole next turn.
+- An answer cut mid-stream stays visible (`msg--stopped`) but is **not** pushed to
+  `state.messages`.
+- **Tokens** are read, never estimated: `lib/token-usage.js` normalises Ollama's final
+  chunk and OpenAI `usage`, and keeps "not reported" apart from 0. `runAgentLoop` sums one
+  turn and prints it in the turn report. Only agent calls count; suggestions and titles do
+  not. Never a money figure from a price table; the only cost shown is Copilot's measured one.
+- `withoutThinking()` drops `thinking` from what is sent to Ollama. It stays in
+  `state.messages` and in the bubble.
+
+## Turn report and Copilot balance (0.7.14)
+
+- **The verdict is computed, never asked for.** `lib/turn-report.js` (pure, tested) takes how
+  the loop ended (`agentRounds()` returns `answered` / `stopped` / `limit` /
+  `provider-error`), every tool outcome recorded by `trace()` into `turnWatch`, and the page
+  errors. A tool that returns normally but says `FAILED`/`Error:` counts as failed; `NOT
+  submitted` is its own warning. `wait` is not a page tool: a turn of only waits is "Answer
+  only". The report is never sent to the model. Do not add a model call to produce it.
+- **One console capture, two readers.** The worker captures one tab (`consoleCaptureTab`).
+  `syncConsoleCapture()` is the only thing that switches it: the recording's tab while a
+  session log is open, else the turn's tab while a turn runs, else off. It wraps the page's
+  `console.error/warn`, so it must never be left on outside those two. Do not send
+  `CONSOLE_CAPTURE` from anywhere else, or one reader turns off the other's capture.
+- Errors a tool triggers land after it returns, hence `TURN_ERRORS_GRACE_MS` before the
+  report (skipped after Stop).
+- **Copilot balance**: `fetchCopilotQuota()` in the worker calls
+  `api.github.com/copilot_internal/user` with the **OAuth** token (`token gho_…`), not the
+  session token. Undocumented; the shape and headers follow **Win-CodexBar**
+  (`nesszer/Win-CodexBar`, `rust/src/providers/copilot/api.rs`), which tracks it against live
+  accounts — read theirs before theorising, as with the upstream inspector. `parseCopilotQuota()`
+  treats every field as optional and shows less rather than a wrong number.
+  `token_based_billing` (top level, sometimes per snapshot) decides credits vs requests.
+  **A token-billed seat may report entitlement 0 on every snapshot**: that means "allowance not
+  reported", and the consumption lives only in `credits_used`. Never render it as "0 of 0
+  left". `placeholder: true` snapshots are skipped; the Free plan uses `limited_user_quotas` /
+  `monthly_quotas`. The per-turn cost is the balance
+  difference (`quotaSpent()`), shown only when positive: GitHub's snapshot may lag. The worker
+  dumps only the quota fields to Logs, once, never the login or organisations.
+
 ## Running it
 
 ```bash

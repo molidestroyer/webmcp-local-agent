@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.7.14
+
+- **Informe de cada turno.** Bajo cada respuesta, una tarjeta con el veredicto calculado por
+  código, no por lo que diga el modelo: ✅ *Done*, ⚠️ *Done, with issues*, ❌ *A tool call
+  failed* / *Round limit reached*, 💬 *Waiting for your answer* o *Answer only* (ninguna tool
+  de la página respalda la respuesta). Lee los resultados de las tools (también los que
+  vuelven «bien» pero dicen `FAILED`/`Error:`), los formularios que quedaron **NOT
+  submitted**, si un fallo se recuperó después, cómo terminó el bucle y los **errores de la
+  página durante el turno**. Lleva también los tokens. Va al `.log` de la sesión. No se envía
+  al modelo: no cuesta nada.
+- **Errores de la página en cada turno.** La captura de consola que antes solo se encendía al
+  grabar (`window.error`, `unhandledrejection`, `console.error/warn`) se enciende durante
+  cada turno y se apaga al acabar. `syncConsoleCapture()` reparte la única captura del worker
+  entre la grabación y el turno.
+- **Saldo mensual de Copilot.** Ajustes → Copilot muestra `620 of 1,000 credits left (62%,
+  $6.20) · used 380 · resets 2026-11-01`, leído de `api.github.com/copilot_internal/user` (el
+  endpoint que usa VS Code; sin documentar). Con un modelo de Copilot, el informe del turno
+  añade lo que costó, medido como diferencia de saldo antes/después. Si el saldo aún no se ha
+  movido, no se muestra nada en vez de un 0. La primera consulta vuelca a Logs solo los campos
+  de cuota, para poder comprobar el formato con una cuenta real. El formato y las cabeceras
+  siguen a Win-CodexBar: un asiento Business facturado por tokens puede informar
+  `entitlement: 0` en todas las snapshots; entonces se muestra lo consumido
+  (`credits_used`) y «allowance not reported», nunca «0 of 0 left». El plan Free usa
+  `limited_user_quotas`/`monthly_quotas`.
+
+## 0.7.13
+
+- **Botón Stop.** Mientras el agente trabaja, Enviar pasa a ser ■ Stop (también `Esc` en el
+  cuadro de texto). Corta la petición en curso al modelo (Ollama y Copilot, vía
+  `AbortController`), un `wait`, la espera a que la lista de tools se asiente y una confirmación
+  pendiente. Una tool que ya se está ejecutando en la página no se puede parar: se deja de
+  esperarla y su resultado dice que pudo completarse. Cada llamada que quedaba en la respuesta del
+  modelo recibe igualmente su resultado («Not run: …»), o Copilot rechazaría el siguiente turno.
+- **Tokens por turno.** Bajo cada turno aparece `🪙 3.4k in (1.5k cached) · 280 out · 3 model
+  calls`, sumando todas las llamadas al modelo del turno (`prompt_eval_count`/`eval_count` de
+  Ollama, `usage` de Copilot). Si el proveedor no informa, lo dice en vez de mostrar 0. También va
+  al `.log` de la sesión. No se muestra coste: Ollama es local y Copilot va por suscripción, así
+  que cualquier precio sería inventado.
+- **El razonamiento (`thinking`) ya no se reenvía.** Se sigue mostrando plegado en su burbuja, pero
+  no viaja en las rondas siguientes, que solo necesitan las llamadas y sus resultados.
+- Las sugerencias con Copilot ahora sí se cancelan por timeout: `copilotChat()` acepta `signal`.
+
 ## 0.7.12
 
 - **Grabación: cambiar de hilo con el agente trabajando mezclaba conversaciones.** El turno en
