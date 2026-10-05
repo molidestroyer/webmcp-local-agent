@@ -3037,6 +3037,12 @@ async function agentRounds(signal, turn) {
         reply = await ollamaChat(state.messages, tools, (kind, delta) => bubble.append(kind, delta), options);
       }
     } catch (err) {
+      // A call that never answered still cost time (a local model loading, a slow provider):
+      // it goes in the trace as its own line instead of the turn reading "0 call(s)".
+      if (turnWatch) {
+        turnWatch.rounds.push({ ms: Math.round(performance.now() - roundStarted), usage: null, parts, choices: 1,
+          nudge: afterNudge, reply: signal.aborted ? 'stopped before the answer' : 'error: ' + AT.clip((err && err.message) || err, 80) });
+      }
       if (signal.aborted) {
         bubble.stop();
         return 'stopped';

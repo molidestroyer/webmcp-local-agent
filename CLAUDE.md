@@ -534,6 +534,10 @@ lines. Two things it is easy to get wrong:
   `agentRounds()` (`turnWatch.rounds`) and per turn in `recordTrace()`, kept in
   `chrome.storage.local.agentTrace` (last 20). Prompt parts are estimates (4 chars/token);
   the totals are the provider's numbers. Keep it free of conversation text beyond clips.
+- **Verdict titles (0.7.16).** `buildTurnReport()` collects every issue, worst first, and the
+  first one is the title. A model's question is a suffix (`· waiting for you`), **never** the
+  verdict when there is an issue: it hid a booking that was never sent. Rounds that never
+  answered (Stop, provider error) are pushed to the trace from `agentRounds()`'s catch.
 
 ## Running it
 
