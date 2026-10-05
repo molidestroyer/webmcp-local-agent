@@ -156,6 +156,8 @@ const els = {
   copilotDisconnectedView: document.getElementById('copilot-disconnected-view'),
   copilotPendingView: document.getElementById('copilot-pending-view'),
   copilotConnectedView: document.getElementById('copilot-connected-view'),
+  copilotQuota: document.getElementById('copilot-quota'),
+  copilotQuotaRefresh: document.getElementById('copilot-quota-refresh'),
   copilotConnectBtn: document.getElementById('copilot-connect-btn'),
   copilotUserCode: document.getElementById('copilot-user-code'),
   copilotCopyCodeBtn: document.getElementById('copilot-copy-code-btn'),
@@ -237,6 +239,7 @@ const state = {
   activeRuleNames: [],
   announcedContext: null,
   copilotConnected: false,
+  copilotQuota: null,
   copilotModels: [],
   copilotDeviceCode: null,
   copilotDeviceExpiresAt: 0,
@@ -317,6 +320,7 @@ function renderMarkdown(container, text) {
 // Shared with the page hook and the tests: see lib/webmcp-schema.js.
 const S = globalThis.__WebMCPLocalAgentSchema;
 const U = globalThis.__WebMCPTokenUsage;
+const TR = globalThis.__WebMCPTurnReport;
 const R = globalThis.__WebMCPRecorder;
 const tokens = S.tokens;
 const humanize = S.humanize;
@@ -2251,6 +2255,7 @@ async function runToolCall(call, signal) {
   // traced here, so the session log and the on-page banner see all of them alike.
   const hudId = state.showVirtualCursor ? ++hudSeq : 0;
   const trace = ({ ok, output, ms, note }) => {
+    if (turnWatch) turnWatch.tools.push({ name: String(name || '(unnamed)'), ok, note, output: String(output || '') });
     const entry = SL.toolEntry({ name: String(name || '(unnamed)'), args, ok, output, ms, note });
     logSession('tool', entry.text, undefined, entry.detail);
     if (hudId) bridge('hud', { phase: 'end', id: hudId, ok });  // corner not needed: the card exists already
@@ -2446,10 +2451,8 @@ async function runAgent(signal) {
   logSession('chat', 'User: ' + SL.clip(lastUserRequest(), SL.LIMITS.chat));
   try {
     await runAgentLoop(signal);
-    if (signal.aborted) {
-      addMessage('note', 'Stopped. Anything already done on the page stays done.');
-      logSession('internal', 'stopped by the user');
-    }
+    // The turn report says "Stopped by you"; this is only the log's marker.
+    if (signal.aborted) logSession('internal', 'stopped by the user');
   } finally {
     announceGoal('');
     if (state.recordMode !== 'session') await endSessionCapture();
@@ -2532,6 +2535,28 @@ function checkRecordedTab() {
   showStatus('The recording keeps filming the tab it started on, but the agent now works on this one. Go back to that tab, or stop and start the recording again.');
 }
 
+/**
+ * The page's errors are wanted by two readers: the session log while recording, and the
+ * report of the turn in progress. The worker captures one tab at a time, so this asks for
+ * whichever tab is wanted now and releases it when nobody is. Capture wraps the page's
+ * console.error/warn, so it is never left on outside a turn or a recording.
+ */
+let captureTab = null;
+function syncConsoleCapture() {
+  const want = sessionLog ? sessionLog.tabId : (turnWatch ? turnWatch.tabId : null);
+  if (want === captureTab) return Promise.resolve();
+  const previous = captureTab;
+  captureTab = want;
+  if (previous != null && want == null) {
+    chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: previous, enabled: false }).catch(() => {});
+    return Promise.resolve();
+  }
+  // Switching tabs: enabling the new one also moves the worker off the old one, but the old
+  // page keeps its console wrapped until told otherwise.
+  if (previous != null) chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: previous, enabled: false }).catch(() => {});
+  return chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: want, enabled: true }).catch(() => {});
+}
+
 /** `detail` is an indented block under the line (a tool's result or error). */
 function logSession(kind, text, t, detail) {
   if (!sessionLog) return;
@@ -2542,7 +2567,7 @@ async function startSessionLog() {
   let url = '';
   try { url = (await chrome.tabs.get(state.tabId)).url || ''; } catch (_) { /* tab gone */ }
   sessionLog = { startedAt: Date.now(), tabId: state.tabId, url, lines: [] };
-  await chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: state.tabId, enabled: true }).catch(() => {});
+  await syncConsoleCapture();
 }
 
 async function saveSessionLog() {
@@ -2554,7 +2579,7 @@ async function saveSessionLog() {
   // tab was just closed this round trip hangs on the bridge (2 s with no port, up to the
   // 35 s bridge timeout with a dying one), and the .log arrived long after the video, or not
   // at all if the panel closed first.
-  chrome.runtime.sendMessage({ type: 'CONSOLE_CAPTURE', tabId: log.tabId, enabled: false }).catch(() => {});
+  syncConsoleCapture();
   try {
     const blob = new Blob([SL.formatSessionLog(log, Date.now())], { type: 'text/plain' });
     const where = await saveRecordingFile(blob, `${stem}.log`, await resolveRecordingsDir());
@@ -2809,24 +2834,92 @@ async function settleTools(signal) {
   logSession('internal', `settleTools: still changing after ${SETTLE_MAX_MS} ms, continuing with ${state.tools.length} tool(s)`);
 }
 
+/** What the turn in progress did, for its report: filled by trace() and by PAGE_LOG. */
+let turnWatch = null; // { tabId, tools: [], pageErrors: [] }
+const TURN_ERRORS_MAX = 50;
+/** An error a tool's last action triggers lands a moment after the tool returns. */
+const TURN_ERRORS_GRACE_MS = 400;
+const REPORT_ICONS = { ok: '\u2705', warn: '\u26A0\uFE0F', fail: '\u274C', info: '\u{1F4AC}' };
+
 /**
- * Tokens of one turn, every model call of it added up, under the turn in the chat and in
- * the session log. Only the agent's calls: suggestions and ✨ titles are separate requests.
+ * The card under each turn: a verdict computed from tool outcomes, how the loop ended and
+ * the page's errors, plus the turn's tokens. Never sent to the model, so it costs nothing.
+ * Only the agent's calls count as tokens: suggestions and ✨ titles are separate requests.
  */
-function reportTurnUsage(turn) {
-  const text = U.formatTurn(turn);
-  if (!text) return;
-  addMessage('usage', '\u{1FA99} ' + text);
-  console.log('[Agent] Turn usage: ' + text + '.');
-  logSession('internal', 'tokens: ' + text);
+function renderTurnReport(report, usageText) {
+  clearEmptyState();
+  const card = document.createElement('details');
+  card.className = 'msg turn-report turn-report--' + report.level;
+  const summary = document.createElement('summary');
+  const title = document.createElement('span');
+  title.className = 'turn-report__title';
+  title.textContent = REPORT_ICONS[report.level] + ' ' + report.title;
+  summary.appendChild(title);
+  if (usageText) {
+    const usage = document.createElement('span');
+    usage.className = 'turn-report__usage';
+    usage.textContent = '\u{1FA99} ' + usageText;
+    summary.appendChild(usage);
+  }
+  card.appendChild(summary);
+  const list = document.createElement('ul');
+  for (const item of report.items) {
+    const li = document.createElement('li');
+    li.textContent = item;
+    list.appendChild(li);
+  }
+  card.appendChild(list);
+  // Problems open by default; a clean "Done" stays a one-liner.
+  card.open = report.level === 'fail' || report.level === 'warn';
+  if (!report.items.length) card.classList.add('turn-report--bare');
+  els.chat.appendChild(card);
+  scrollToBottom();
+}
+
+/** "12 credits ($0.12)" for the turn, or '' when GitHub's balance has not moved (yet). */
+async function turnQuotaText(before) {
+  const Copilot = globalThis.__WebMCPCopilotService;
+  const after = before ? await loadCopilotQuota().catch(() => null) : null;
+  const spent = Copilot && Copilot.quotaSpent(before, after);
+  if (!spent || spent <= 0) return '';
+  const amount = Math.round(spent * 100) / 100;
+  return after.unit === 'credits'
+    ? amount + ' credits ($' + (spent / 100).toFixed(2) + ')'
+    : amount + ' premium request(s)';
 }
 
 async function runAgentLoop(signal) {
   const turn = U.emptyTurn();
+  turnWatch = { tabId: state.tabId, tools: [], pageErrors: [] };
+  // Copilot bills credits per token: the balance before and after the turn is what it really
+  // cost. Asked in parallel, so it never delays the first model call.
+  const quotaBefore = state.model.startsWith('copilot:') ? loadCopilotQuota().catch(() => null) : null;
+  // Waited for, so an error thrown by the very first tool is caught; bounded, because the
+  // bridge can take seconds on a tab that is reloading.
+  await Promise.race([syncConsoleCapture(), sleep(1000)]);
+  let end = 'provider-error';
   try {
-    await agentRounds(signal, turn);
+    end = await agentRounds(signal, turn);
   } finally {
-    reportTurnUsage(turn);
+    if (!signal.aborted) await sleep(TURN_ERRORS_GRACE_MS);
+    const watch = turnWatch;
+    turnWatch = null;
+    syncConsoleCapture();
+    const last = [...state.messages].reverse().find((m) => m.role === 'assistant');
+    const report = TR.buildTurnReport({
+      end: signal.aborted ? 'stopped' : end,
+      reply: (last && last.content) || '',
+      tools: watch.tools,
+      pageErrors: watch.pageErrors,
+      limit: state.maxToolSteps,
+    });
+    let usageText = U.formatTurn(turn);
+    if (quotaBefore) usageText = [usageText, await turnQuotaText(await quotaBefore)].filter(Boolean).join(' \u00b7 ');
+    renderTurnReport(report, usageText);
+    console.log('[Agent] Turn report: ' + TR.formatReport(report).replace(/\n\s*/g, ' | ')
+      + (usageText ? ' | tokens: ' + usageText : ''));
+    logSession('internal', 'turn report: ' + TR.formatReport(report));
+    if (usageText) logSession('internal', 'tokens: ' + usageText);
   }
 }
 
@@ -2843,7 +2936,7 @@ async function agentRounds(signal, turn) {
     // After a tool ran, the page may still be mounting the next view.
     if (lastRound.length) await settleTools(signal);
     else await detectPageTools();
-    if (signal.aborted) return;
+    if (signal.aborted) return 'stopped';
     const tools = state.tools.map(toOllamaTool);
     tools.unshift(NATIVE_WAIT_TOOL);
 
@@ -2860,11 +2953,11 @@ async function agentRounds(signal, turn) {
     } catch (err) {
       if (signal.aborted) {
         bubble.stop();
-        return;
+        return 'stopped';
       }
       if (err && err.status === 403) showStatus(CORS_HINT);
       bubble.fail('Failed to reach AI provider: ' + String((err && err.message) || err));
-      return;
+      return 'provider-error';
     }
     U.addCall(turn, usage);
 
@@ -2877,7 +2970,7 @@ async function agentRounds(signal, turn) {
       // step, bounded; anything else (a question, a failure) ends the turn.
       if (!S.shouldNudge({ request, reply, lastRound, nudges, maxNudges: MAX_NUDGES })) {
         console.log('[Agent] Turn ended with text (round ' + (step + 1) + ', nudges used ' + nudges + '/' + MAX_NUDGES + ').');
-        return;
+        return 'answered';
       }
       nudges++;
       console.log('[Agent] Nudge ' + nudges + '/' + MAX_NUDGES + ' after round ' + (step + 1) + ': multi-step request, last round succeeded, reply had no question and no tool call.');
@@ -2899,10 +2992,11 @@ async function agentRounds(signal, turn) {
       lastRound.push(result);
       state.messages.push(result);
     }
-    if (signal.aborted) return;
+    if (signal.aborted) return 'stopped';
   }
 
   addMessage('note', 'Reached the limit of ' + maxSteps + ' tool rounds. You can change it in Settings → Agent Limits.');
+  return 'limit';
 }
 
 function stopAgent() {
@@ -3513,6 +3607,9 @@ chrome.runtime.onMessage.addListener((message) => {
     if (message.tabId === (sessionLog && sessionLog.tabId)) {
       logSession(entry.level === 'warn' ? 'warn' : 'error', entry.text || '', entry.t);
     }
+    if (turnWatch && message.tabId === turnWatch.tabId && turnWatch.pageErrors.length < TURN_ERRORS_MAX) {
+      turnWatch.pageErrors.push({ level: entry.level === 'warn' ? 'warn' : 'error', text: String(entry.text || '') });
+    }
     return;
   }
   if (message.type === 'tools-changed' && message.tabId === state.tabId) {
@@ -3545,6 +3642,7 @@ function renderCopilotStatus() {
     if (els.copilotPendingView) els.copilotPendingView.hidden = true;
     if (els.copilotConnectedView) els.copilotConnectedView.hidden = false;
     if (els.copilotErrorMsg) els.copilotErrorMsg.hidden = true;
+    if (!state.copilotQuota) loadCopilotQuota();
   } else if (state.copilotDeviceCode) {
     if (els.copilotDisconnectedView) els.copilotDisconnectedView.hidden = true;
     if (els.copilotPendingView) els.copilotPendingView.hidden = false;
@@ -3555,6 +3653,30 @@ function renderCopilotStatus() {
     if (els.copilotConnectedView) els.copilotConnectedView.hidden = true;
   }
 }
+
+/**
+ * The monthly allowance, asked of GitHub (see fetchCopilotQuota() in background.js). Resolves
+ * to the parsed quota or null: a failure here must never get in the way of chatting.
+ */
+async function loadCopilotQuota() {
+  const Copilot = globalThis.__WebMCPCopilotService;
+  if (!state.copilotConnected || !Copilot) return null;
+  const answer = await chrome.runtime.sendMessage({ type: 'COPILOT_QUOTA' }).catch((err) => ({ error: String(err) }));
+  if (!answer || !answer.success) {
+    if (els.copilotQuota) els.copilotQuota.textContent = 'Monthly usage unavailable: ' + ((answer && answer.error) || 'no answer');
+    return null;
+  }
+  const quota = Copilot.parseCopilotQuota(answer.raw);
+  state.copilotQuota = quota;
+  if (els.copilotQuota) {
+    els.copilotQuota.textContent = quota
+      ? 'Monthly usage: ' + (Copilot.formatCopilotQuota(quota) || 'no figures reported') + (quota.plan ? ' · plan ' + quota.plan : '')
+      : 'Monthly usage: GitHub reported no quota for this account.';
+  }
+  return quota;
+}
+
+if (els.copilotQuotaRefresh) els.copilotQuotaRefresh.addEventListener('click', () => loadCopilotQuota());
 
 function showCopilotError(message) {
   if (els.copilotErrorMsg) {
@@ -3692,6 +3814,7 @@ async function disconnectCopilot() {
   });
   state.copilotConnected = false;
   state.copilotModels = [];
+  state.copilotQuota = null;
   renderCopilotStatus();
   renderModelOptions();
 }

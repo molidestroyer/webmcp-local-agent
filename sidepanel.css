@@ -273,16 +273,34 @@ body {
   text-align: center;
 }
 
-/* Tokens of the turn: a footnote under it, quieter than a note. */
-.msg--usage {
-  align-self: flex-end;
+/* The verdict under each turn (lib/turn-report.js) with the turn's tokens. */
+.turn-report {
+  align-self: stretch;
   max-width: 100%;
-  padding: 0 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
   background: transparent;
-  color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 11.5px;
+  white-space: normal;
 }
+.turn-report--ok { border-left-color: var(--green); }
+.turn-report--warn { border-left-color: var(--amber); }
+.turn-report--fail { border-left-color: var(--red); }
+.turn-report--info { border-left-color: var(--text-faint); }
+.turn-report summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  justify-content: space-between;
+  cursor: pointer;
+  list-style: none;
+}
+.turn-report summary::-webkit-details-marker { display: none; }
+.turn-report--bare summary { cursor: default; }
+.turn-report__usage { color: var(--text-faint); font-family: var(--mono); font-size: 10.5px; }
+.turn-report ul { margin: 4px 0 2px; padding-left: 18px; color: var(--text-dim); }
+.turn-report li { overflow-wrap: anywhere; }
 
 /* An answer cut by Stop: what streamed in stays, marked as incomplete. */
 .msg--stopped { opacity: 0.7; border-style: dashed; }
@@ -1363,3 +1381,7 @@ body {
 .scope-btn[aria-pressed="true"] { border-color: #3b82f6; color: #93c5fd; background: rgba(59, 130, 246, 0.12); }
 .prompt-browser__empty { font-size: 12px; color: var(--text-dim); padding: 6px 2px; }
 .prompt-browser__foot { font-size: 10px; color: var(--text-dim); }
+
+/* Copilot monthly allowance, under the connected state. */
+.copilot-quota-row { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; }
+.copilot-quota { flex: 1 1 auto; font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }

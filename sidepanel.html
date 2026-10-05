@@ -395,6 +395,10 @@
             <p class="setting-item__desc">
               Copilot session active. Remote models (GPT-4o, Claude 3.5, etc.) are available in the model selector.
             </p>
+            <div class="copilot-quota-row">
+              <span id="copilot-quota" class="copilot-quota" title="Monthly allowance as GitHub reports it. Chat is billed in AI credits (1 credit = $0.01) since June 2026.">Monthly usage: not loaded yet</span>
+              <button id="copilot-quota-refresh" class="btn-small" type="button" title="Ask GitHub for the current balance">🔄</button>
+            </div>
             <button id="copilot-disconnect-btn" class="btn-small btn-danger" type="button">Disconnect / Revoke Token</button>
           </div>
 
@@ -468,6 +472,7 @@
   <script src="lib/session-log.js"></script>
   <script src="lib/agent-goal.js"></script>
   <script src="lib/token-usage.js"></script>
+  <script src="lib/turn-report.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

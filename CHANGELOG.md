@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.14
+
+- **Informe de cada turno.** Bajo cada respuesta, una tarjeta con el veredicto calculado por
+  código, no por lo que diga el modelo: ✅ *Done*, ⚠️ *Done, with issues*, ❌ *A tool call
+  failed* / *Round limit reached*, 💬 *Waiting for your answer* o *Answer only* (ninguna tool
+  de la página respalda la respuesta). Lee los resultados de las tools (también los que
+  vuelven «bien» pero dicen `FAILED`/`Error:`), los formularios que quedaron **NOT
+  submitted**, si un fallo se recuperó después, cómo terminó el bucle y los **errores de la
+  página durante el turno**. Lleva también los tokens. Va al `.log` de la sesión. No se envía
+  al modelo: no cuesta nada.
+- **Errores de la página en cada turno.** La captura de consola que antes solo se encendía al
+  grabar (`window.error`, `unhandledrejection`, `console.error/warn`) se enciende durante
+  cada turno y se apaga al acabar. `syncConsoleCapture()` reparte la única captura del worker
+  entre la grabación y el turno.
+- **Saldo mensual de Copilot.** Ajustes → Copilot muestra `620 of 1,000 credits left (62%,
+  $6.20) · used 380 · resets 2026-11-01`, leído de `api.github.com/copilot_internal/user` (el
+  endpoint que usa VS Code; sin documentar). Con un modelo de Copilot, el informe del turno
+  añade lo que costó, medido como diferencia de saldo antes/después. Si el saldo aún no se ha
+  movido, no se muestra nada en vez de un 0. La primera consulta vuelca a Logs solo los campos
+  de cuota, para poder comprobar el formato con una cuenta real.
+
 ## 0.7.13
 
 - **Botón Stop.** Mientras el agente trabaja, Enviar pasa a ser ■ Stop (también `Esc` en el

@@ -193,3 +193,54 @@ test('contentToText flattens content blocks', () => {
   assert.equal(CopilotService.contentToText([{ type: 'text', text: 'ho' }, { type: 'text', text: 'la' }]), 'hola');
   assert.equal(CopilotService.contentToText(null), '');
 });
+
+test('parseCopilotQuota reads token-based billing in credits', () => {
+  const q = CopilotService.parseCopilotQuota({
+    copilot_plan: 'individual',
+    quota_reset_date: '2026-11-01',
+    quota_reset_date_utc: '2026-11-01T00:00:00.000Z',
+    quota_snapshots: {
+      chat: { unlimited: true },
+      premium_interactions: {
+        unlimited: false, entitlement: 1000, remaining: 620, percent_remaining: 62,
+        overage_permitted: false, overage_count: 0, token_based_billing: true, credits_used: 380,
+      },
+    },
+  });
+  assert.equal(q.unit, 'credits');
+  assert.equal(q.remaining, 620);
+  assert.equal(q.used, 380);
+  assert.equal(q.resetDate, '2026-11-01');
+  assert.equal(CopilotService.formatCopilotQuota(q),
+    '620 of 1,000 credits left (62%, $6.20) · used 380 · resets 2026-11-01');
+});
+
+test('parseCopilotQuota tolerates the older request shape, overage and missing fields', () => {
+  const legacy = CopilotService.parseCopilotQuota({
+    quota_reset_date: '2026-11-01',
+    quota_snapshots: { premium_interactions: { entitlement: 300, remaining: 120, percent_remaining: 40 } },
+  });
+  assert.equal(legacy.unit, 'requests');
+  assert.equal(legacy.used, 180);
+  assert.equal(CopilotService.formatCopilotQuota(legacy),
+    '120 of 300 requests left (40%) · used 180 · resets 2026-11-01');
+
+  // Over the allowance (a Business seat reported remaining -740).
+  const over = CopilotService.parseCopilotQuota({ quota_snapshots: { premium_interactions: {
+    entitlement: 3000, remaining: -740, credits_used: 3739, token_based_billing: true, percent_remaining: 0 } } });
+  assert.match(CopilotService.formatCopilotQuota(over), /^0 of 3,000 credits left \(0%, \$0\.00\) · used 3,739 · 740 over the allowance$/);
+
+  assert.equal(CopilotService.parseCopilotQuota(null), null);
+  assert.equal(CopilotService.parseCopilotQuota({}), null);
+  assert.equal(CopilotService.formatCopilotQuota(CopilotService.parseCopilotQuota({
+    quota_snapshots: { premium_interactions: { unlimited: true } } })), 'Unlimited');
+});
+
+test('quotaSpent measures a turn from two balances, or says it cannot', () => {
+  const at = (used, remaining) => ({ unit: 'credits', used, remaining });
+  assert.equal(CopilotService.quotaSpent(at(380, 620), at(392, 608)), 12);
+  assert.equal(CopilotService.quotaSpent(at(null, 620), at(null, 600)), 20);
+  assert.equal(CopilotService.quotaSpent(at(null, null), at(null, null)), null);
+  assert.equal(CopilotService.quotaSpent(null, at(1, 1)), null);
+  assert.equal(CopilotService.quotaSpent(at(1, 1), { unit: 'requests', used: 2, remaining: 0 }), null);
+});

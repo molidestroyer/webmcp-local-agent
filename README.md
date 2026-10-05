@@ -200,11 +200,23 @@ response, and the run is added to History.
 | ➤ / ■ | Sends; while the agent works it becomes **Stop** (or press `Esc`). Stop cancels the model request, a `wait` and a pending confirmation. A tool already running on the page cannot be cancelled: the agent stops waiting for it and tells the model it may have completed. |
 | ☑ Confirm every tool | Asks for your approval before each call. Off by default. |
 
-Under each turn a footnote such as `🪙 3.4k in (1.5k cached) · 280 out · 3 model calls`
-adds up the tokens every model call of that turn reported (Ollama's
-`prompt_eval_count`/`eval_count`, Copilot's `usage`). Ollama may count only the part of the
-prompt it could not reuse from its cache. Suggestions and ✨ titles are separate requests
-and are not included.
+Under each turn a **report** gives a verdict computed from what happened, not from what the
+model says: ✅ Done, ⚠️ Done with issues, ❌ a tool call failed or the round limit was hit,
+💬 waiting for your answer, or *answer only* (no page tool backs the reply). It reads every
+tool result (including ones that return normally but say `FAILED`), forms left **NOT
+submitted**, whether a failure was later recovered, and the **errors the page logged during
+the turn** (`window.onerror`, unhandled rejections, `console.error`/`warn`, captured only
+while a turn runs). It is never sent to the model.
+
+The same card shows the turn's tokens, e.g. `🪙 3.4k in (1.5k cached) · 280 out · 3 model
+calls` (Ollama's `prompt_eval_count`/`eval_count`, Copilot's `usage`; Ollama may count only
+the part of the prompt it could not reuse from its cache). With a Copilot model it adds what
+the turn cost in AI credits, measured as the change in your monthly balance. Suggestions and
+✨ titles are separate requests and are not included.
+
+**Copilot balance.** Settings → GitHub Copilot shows the monthly allowance (credits left,
+used, reset date) as `api.github.com/copilot_internal/user` reports it. That endpoint is the
+one VS Code reads and is undocumented; the first query dumps its quota fields to the Logs tab.
 
 ---
 
