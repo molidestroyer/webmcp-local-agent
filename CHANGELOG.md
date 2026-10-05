@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.13
+
+- **Botón Stop.** Mientras el agente trabaja, Enviar pasa a ser ■ Stop (también `Esc` en el
+  cuadro de texto). Corta la petición en curso al modelo (Ollama y Copilot, vía
+  `AbortController`), un `wait`, la espera a que la lista de tools se asiente y una confirmación
+  pendiente. Una tool que ya se está ejecutando en la página no se puede parar: se deja de
+  esperarla y su resultado dice que pudo completarse. Cada llamada que quedaba en la respuesta del
+  modelo recibe igualmente su resultado («Not run: …»), o Copilot rechazaría el siguiente turno.
+- **Tokens por turno.** Bajo cada turno aparece `🪙 3.4k in (1.5k cached) · 280 out · 3 model
+  calls`, sumando todas las llamadas al modelo del turno (`prompt_eval_count`/`eval_count` de
+  Ollama, `usage` de Copilot). Si el proveedor no informa, lo dice en vez de mostrar 0. También va
+  al `.log` de la sesión. No se muestra coste: Ollama es local y Copilot va por suscripción, así
+  que cualquier precio sería inventado.
+- **El razonamiento (`thinking`) ya no se reenvía.** Se sigue mostrando plegado en su burbuja, pero
+  no viaja en las rondas siguientes, que solo necesitan las llamadas y sus resultados.
+- Las sugerencias con Copilot ahora sí se cancelan por timeout: `copilotChat()` acepta `signal`.
+
 ## 0.7.12
 
 - **Grabación: cambiar de hilo con el agente trabajando mezclaba conversaciones.** El turno en

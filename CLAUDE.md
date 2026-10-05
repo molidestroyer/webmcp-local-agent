@@ -461,6 +461,27 @@ lines. Two things it is easy to get wrong:
   polyfill. Downloads vanish when the context closes, so copy them first. Run it after touching
   the agent loop, page-hook execution, the overlay or recording.
 
+## Stop and token usage (0.7.13)
+
+- **Stop is the Send button.** `agentAbort` (an `AbortController`, declared near
+  `updateSendState()` so the first render does not hit its TDZ) exists only while a turn
+  runs, and its presence is what turns ➤ into ■. Its signal reaches `ollamaChat`,
+  `copilotChat` → `chatCompletion` (which must rethrow on abort instead of trying the next
+  fallback URL), `settleTools`, the `wait` tool (`sleep()`) and `card.confirm()`.
+- **A page tool cannot be cancelled**: `runToolCall` races `executeOnPage` against
+  `whenAborted()` and says the tool *may* have completed. Never claim it was undone.
+- **Every `tool_call` gets a result, even after Stop.** Calls a Stop skipped get
+  `STOPPED_BEFORE_CALL` through `toolResultMessage()`. Leave one unanswered and Copilot
+  rejects the whole next turn.
+- An answer cut mid-stream stays visible (`msg--stopped`) but is **not** pushed to
+  `state.messages`.
+- **Tokens** are read, never estimated: `lib/token-usage.js` normalises Ollama's final
+  chunk and OpenAI `usage`, and keeps "not reported" apart from 0. `runAgentLoop` sums one
+  turn and `reportTurnUsage()` prints it under the turn and into the session log. Only agent
+  calls count; suggestions and titles do not. No money figure: there is no real price to show.
+- `withoutThinking()` drops `thinking` from what is sent to Ollama. It stays in
+  `state.messages` and in the bubble.
+
 ## Running it
 
 ```bash

@@ -6,6 +6,6 @@
   "license": "MIT",
   "scripts": {
     "test": "node --test",
-    "lint": "node --check background.js && node --check content.js && node --check page-hook.js && node --check sidepanel.js && node --check lib/webmcp-schema.js"
+    "lint": "node --check background.js && node --check content.js && node --check page-hook.js && node --check sidepanel.js && node --check lib/webmcp-schema.js && node --check lib/token-usage.js"
   }
 }

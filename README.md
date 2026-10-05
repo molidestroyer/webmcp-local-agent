@@ -197,7 +197,14 @@ response, and the run is added to History.
 | 🔄 (header, right) | Re-inspects the active tab. |
 | 🔄 (model row) | Queries `/api/tags` again — use it after an `ollama pull` in a terminal. |
 | 🗑 | Clears the conversation. |
+| ➤ / ■ | Sends; while the agent works it becomes **Stop** (or press `Esc`). Stop cancels the model request, a `wait` and a pending confirmation. A tool already running on the page cannot be cancelled: the agent stops waiting for it and tells the model it may have completed. |
 | ☑ Confirm every tool | Asks for your approval before each call. Off by default. |
+
+Under each turn a footnote such as `🪙 3.4k in (1.5k cached) · 280 out · 3 model calls`
+adds up the tokens every model call of that turn reported (Ollama's
+`prompt_eval_count`/`eval_count`, Copilot's `usage`). Ollama may count only the part of the
+prompt it could not reuse from its cache. Suggestions and ✨ titles are separate requests
+and are not included.
 
 ---
 
@@ -230,11 +237,12 @@ sidepanel.js ──chrome.runtime──> background.js ──Port──> content
 - **`sidepanel.js`** translates each WebMCP tool into Ollama's format
   (`{ type: "function", function: { name, description, parameters } }`), calls
   `POST /api/chat` with `stream: true`, accumulates `tool_calls`, runs them on the page,
-  appends the result as a `role: "tool"` message and calls the model again.
-  Six rounds per turn, maximum.
+  appends the result as a `role: "tool"` message and calls the model again. A turn ends
+  when the model answers with text and no tool call, when you press Stop, or after the
+  round limit in Settings → Agent Limits (100 by default).
 
 Streaming also surfaces the `thinking` block of reasoning models (qwen3, gemma with
-thinking) inside a collapsed disclosure.
+thinking) inside a collapsed disclosure. That reasoning is not sent back on later rounds.
 
 ---
 

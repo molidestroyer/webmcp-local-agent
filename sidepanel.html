@@ -453,9 +453,9 @@
         <span aria-hidden="true">🗑</span>
         <span class="sr-only">Clear conversation</span>
       </button>
-      <button id="send" class="send-btn" type="button" disabled>
-        <span aria-hidden="true">➤</span>
-        <span class="sr-only">Send</span>
+      <button id="send" class="send-btn" type="button" title="Send" disabled>
+        <span id="send-icon" aria-hidden="true">➤</span>
+        <span id="send-label" class="sr-only">Send</span>
       </button>
     </div>
   </footer>
@@ -467,6 +467,7 @@
   <script src="lib/recordings-folder.js"></script>
   <script src="lib/session-log.js"></script>
   <script src="lib/agent-goal.js"></script>
+  <script src="lib/token-usage.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

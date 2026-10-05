@@ -110,6 +110,8 @@ const els = {
   composer: document.getElementById('composer'),
   input: document.getElementById('input'),
   send: document.getElementById('send'),
+  sendIcon: document.getElementById('send-icon'),
+  sendLabel: document.getElementById('send-label'),
   clearChat: document.getElementById('clear-chat'),
   confirmTools: document.getElementById('confirm-tools'),
   suggestions: document.getElementById('suggestions'),
@@ -271,8 +273,19 @@ function providerReady() {
     : state.ollamaOk;
 }
 
+/** The running turn's controller: its presence is what turns Send into Stop. */
+let agentAbort = null;
+
 function updateSendState() {
-  els.send.disabled = state.busy || !providerReady() || !state.model || !els.input.value.trim();
+  // While a turn runs the same button is Stop, so there is always a way out of a looping model.
+  const running = Boolean(agentAbort);
+  els.send.classList.toggle('send-btn--stop', running);
+  els.send.title = running ? 'Stop the agent (Esc)' : 'Send';
+  if (els.sendIcon) els.sendIcon.textContent = running ? '\u25A0' : '\u27A4';
+  if (els.sendLabel) els.sendLabel.textContent = running ? 'Stop' : 'Send';
+  els.send.disabled = running
+    ? agentAbort.signal.aborted
+    : state.busy || !providerReady() || !state.model || !els.input.value.trim();
 }
 
 /** Minimal, safe markdown (never innerHTML for model output). */
@@ -303,6 +316,7 @@ function renderMarkdown(container, text) {
 
 // Shared with the page hook and the tests: see lib/webmcp-schema.js.
 const S = globalThis.__WebMCPLocalAgentSchema;
+const U = globalThis.__WebMCPTokenUsage;
 const R = globalThis.__WebMCPRecorder;
 const tokens = S.tokens;
 const humanize = S.humanize;
@@ -1028,7 +1042,7 @@ async function generatePromptSuggestions() {
   try {
     let content = '';
     if (state.model.startsWith('copilot:')) {
-      const copilotReply = await copilotChat([{ role: 'user', content: prompt }], undefined, () => {});
+      const copilotReply = await copilotChat([{ role: 'user', content: prompt }], undefined, () => {}, { signal });
       content = (copilotReply && copilotReply.content) || '';
     } else {
       const response = await fetch(state.host + '/api/chat', {
@@ -1055,8 +1069,8 @@ async function generatePromptSuggestions() {
     }
 
     if (signal.aborted) {
-      // copilotChat() above isn't wired to `signal`, so a timeout during a Copilot
-      // request doesn't cancel it — it just lands here once it finally resolves.
+      // Belt and braces: both providers take `signal` and normally reject on abort
+      // (handled in the catch below), but a reply that raced the abort lands here.
       if (suggestTimedOut) {
         logResult(false, `Timed out after ${SUGGESTION_TIMEOUT_MS / 1000}s waiting for the model to generate suggestions.`);
       }
@@ -1940,6 +1954,16 @@ function createAssistantBubble() {
       wrapper.remove();
       addMessage('error', text);
     },
+    /** Stopped mid-answer: keep what streamed in, marked as cut. It is not added to the history. */
+    stop() {
+      wrapper.classList.remove('cursor');
+      if (!content && !thinkingBox) {
+        wrapper.remove();
+        return;
+      }
+      wrapper.classList.add('msg--stopped');
+      scrollToBottom();
+    },
   };
 }
 
@@ -1999,7 +2023,7 @@ function createToolCard(name, args) {
       stateEl.textContent = 'cancelled';
       addResult('Status', text);
     },
-    confirm() {
+    confirm(signal) {
       stateEl.textContent = 'awaiting confirmation';
       return new Promise((resolve) => {
         const row = document.createElement('div');
@@ -2022,6 +2046,11 @@ function createToolCard(name, args) {
         };
         yes.addEventListener('click', () => finish(true));
         no.addEventListener('click', () => finish(false));
+        // Stop answers a pending confirmation with "no", or the turn would hang on it.
+        if (signal) {
+          if (signal.aborted) finish(false);
+          else signal.addEventListener('abort', () => { if (row.isConnected) finish(false); }, { once: true });
+        }
       });
     },
   };
@@ -2049,14 +2078,28 @@ function resultToText(result) {
   return pretty(result);
 }
 
-async function ollamaChat(messages, tools, onDelta) {
-  const body = { model: state.model, messages, stream: true };
+/**
+ * A reasoning model's `thinking` is shown in its bubble but not sent back: the next round
+ * needs the calls and their results, not the reasoning that led to them, and resending it
+ * made every round re-read all the earlier ones.
+ */
+function withoutThinking(messages) {
+  return messages.map((message) => {
+    if (!message || !message.thinking) return message;
+    const { thinking, ...rest } = message;
+    return rest;
+  });
+}
+
+async function ollamaChat(messages, tools, onDelta, { signal, onUsage } = {}) {
+  const body = { model: state.model, messages: withoutThinking(messages), stream: true };
   if (tools.length) body.tools = tools;
 
   const response = await fetch(state.host + '/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!response.ok) {
@@ -2069,6 +2112,7 @@ async function ollamaChat(messages, tools, onDelta) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   const accumulated = { content: '', thinking: '', tool_calls: [] };
+  let usage = null; // only the final `done` chunk carries the counters
   let buffer = '';
 
   const handleLine = (line) => {
@@ -2081,6 +2125,7 @@ async function ollamaChat(messages, tools, onDelta) {
       return;
     }
     if (chunk.error) throw new Error(chunk.error);
+    if (chunk.done) usage = U.fromOllama(chunk);
     const message = chunk.message || {};
     if (message.thinking) {
       accumulated.thinking += message.thinking;
@@ -2104,6 +2149,7 @@ async function ollamaChat(messages, tools, onDelta) {
     }
   }
   handleLine(buffer);
+  if (onUsage) onUsage(usage);
 
   const result = { role: 'assistant', content: accumulated.content };
   if (accumulated.thinking) result.thinking = accumulated.thinking;
@@ -2152,21 +2198,54 @@ function previewArgs(args) {
   return lines.length > 180 ? lines.slice(0, 180) + '\u2026' : lines;
 }
 
-async function runToolCall(call) {
+/**
+ * The result message for one call. tool_call_id is what OpenAI-shaped providers (Copilot)
+ * pair the result with; Ollama pairs on tool_name and ignores the extra field. Every way a
+ * call can end goes through this, including calls a Stop skipped, so no path can forget
+ * the id: one unanswered call and Copilot rejects the whole next turn.
+ */
+function toolResultMessage(call, text) {
+  const fn = (call && call.function) || {};
+  return {
+    role: 'tool',
+    tool_name: String(fn.name || 'unknown'),
+    ...(call && call.id ? { tool_call_id: call.id } : {}),
+    content: text,
+  };
+}
+
+const STOPPED_BEFORE_CALL = 'Not run: the user stopped the agent before this call.';
+
+/** A setTimeout that a Stop cuts short. Resolves either way; callers check `signal.aborted`. */
+function sleep(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal && signal.aborted) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    if (signal) signal.addEventListener('abort', done, { once: true });
+  });
+}
+
+/** Resolves with `ABORTED` when the signal fires, so a wait on the page can be raced against it. */
+const ABORTED = Symbol('aborted');
+function whenAborted(signal) {
+  return new Promise((resolve) => {
+    if (!signal) return;
+    if (signal.aborted) resolve(ABORTED);
+    else signal.addEventListener('abort', () => resolve(ABORTED), { once: true });
+  });
+}
+
+async function runToolCall(call, signal) {
   const fn = call.function || {};
   const name = fn.name;
   const args = parseArguments(fn.arguments);
   const card = createToolCard(name || '(unnamed)', args);
-
-  // tool_call_id is what OpenAI-shaped providers (Copilot) pair the result
-  // with; Ollama pairs on tool_name and ignores the extra field. Every exit
-  // below goes through this, so no path can forget the id.
-  const toolMessage = (text) => ({
-    role: 'tool',
-    tool_name: String(name || 'unknown'),
-    ...(call && call.id ? { tool_call_id: call.id } : {}),
-    content: text,
-  });
+  const toolMessage = (text) => toolResultMessage(call, text);
 
   // Every way a call can end (page tool, built-in wait, unknown tool, user cancel) is
   // traced here, so the session log and the on-page banner see all of them alike.
@@ -2191,9 +2270,9 @@ async function runToolCall(call) {
   }
 
   if (els.confirmTools.checked) {
-    const approved = await card.confirm();
+    const approved = await card.confirm(signal);
     if (!approved) {
-      const text = 'The user cancelled this tool call.';
+      const text = signal && signal.aborted ? STOPPED_BEFORE_CALL : 'The user cancelled this tool call.';
       card.cancelled(text);
       recordExecution({ tool: name || 'wait', origin: 'chat', args, ok: false, output: text });
       trace({ ok: false, output: text, note: 'CANCELLED' });
@@ -2211,7 +2290,15 @@ async function runToolCall(call) {
   if (isBuiltinWait) {
     const sec = Math.min(Math.max(Number(args && args.seconds) || 5, 1), 30);
     const started = performance.now();
-    await new Promise((resolve) => setTimeout(resolve, sec * 1000));
+    await sleep(sec * 1000, signal);
+    if (signal && signal.aborted) {
+      const ms = performance.now() - started;
+      const text = 'The user stopped the agent during this wait.';
+      card.cancelled(text);
+      recordExecution({ tool: 'wait', origin: 'chat', args, ok: false, output: text, ms });
+      trace({ ok: false, output: text, ms, note: 'STOPPED' });
+      return toolMessage(text);
+    }
     await detectPageTools();
     const ms = performance.now() - started;
     const text = `Waited ${sec} second(s) for page updates. Current page exposes ${state.tools.length} tool(s).`;
@@ -2222,8 +2309,18 @@ async function runToolCall(call) {
   }
 
   const started = performance.now();
-  const answer = await executeOnPage(name, args);
+  // The page cannot be told to stop a tool that is already running, so Stop only stops
+  // waiting for it. Its result is unknown, and the message says exactly that.
+  const answer = await Promise.race([executeOnPage(name, args), whenAborted(signal)]);
   const ms = performance.now() - started;
+
+  if (answer === ABORTED) {
+    const text = 'The user stopped the agent while this tool was running. It may still have completed on the page.';
+    card.cancelled(text);
+    recordExecution({ tool: name, origin: 'chat', args, ok: false, output: text, ms });
+    trace({ ok: false, output: text, ms, note: 'STOPPED' });
+    return toolMessage(text);
+  }
 
   if (!answer || answer.error) {
     const text = (answer && answer.error) || 'Unknown error while running the tool.';
@@ -2268,7 +2365,7 @@ function goalForCall(reply, call, request, previousTool) {
   });
 }
 
-async function copilotChat(messages, tools, onChunk) {
+async function copilotChat(messages, tools, onChunk, { signal, onUsage } = {}) {
   const tokenRes = await new Promise((resolve) => {
     chrome.runtime.sendMessage({ type: 'GET_OR_REFRESH_COPILOT_TOKEN', forceRefresh: false }, resolve);
   });
@@ -2292,7 +2389,9 @@ async function copilotChat(messages, tools, onChunk) {
     tools,
     sessionToken: tokenRes.token,
     endpointUrl,
+    signal,
   });
+  if (onUsage) onUsage(U.fromOpenAI(result && result.usage));
 
   if (result && result.message && result.message.content) {
     onChunk('text', result.message.content);
@@ -2341,12 +2440,16 @@ async function endSessionCapture() {
   updateRecButton();
 }
 
-async function runAgent() {
+async function runAgent(signal) {
   if (!(state.recordMode === 'session' && recordingDeclined)) await beginSessionCapture();
   // A marker per message, so a long recording can be read against the conversation.
   logSession('chat', 'User: ' + SL.clip(lastUserRequest(), SL.LIMITS.chat));
   try {
-    await runAgentLoop();
+    await runAgentLoop(signal);
+    if (signal.aborted) {
+      addMessage('note', 'Stopped. Anything already done on the page stays done.');
+      logSession('internal', 'stopped by the user');
+    }
   } finally {
     announceGoal('');
     if (state.recordMode !== 'session') await endSessionCapture();
@@ -2684,12 +2787,13 @@ function lastUserRequest() {
  * next step's tools a moment later, and handing the model the list before that makes it
  * conclude the page has nothing left to offer.
  */
-async function settleTools() {
+async function settleTools(signal) {
   await detectPageTools();
   let signature = S.toolSignature(state.tools);
   const startCount = state.tools.length;
   for (let waited = 0; waited < SETTLE_MAX_MS; waited += SETTLE_STEP_MS) {
-    await new Promise((resolve) => setTimeout(resolve, SETTLE_STEP_MS));
+    await sleep(SETTLE_STEP_MS, signal);
+    if (signal && signal.aborted) return;
     await detectPageTools();
     const next = S.toolSignature(state.tools);
     if (next === signature) {
@@ -2705,7 +2809,28 @@ async function settleTools() {
   logSession('internal', `settleTools: still changing after ${SETTLE_MAX_MS} ms, continuing with ${state.tools.length} tool(s)`);
 }
 
-async function runAgentLoop() {
+/**
+ * Tokens of one turn, every model call of it added up, under the turn in the chat and in
+ * the session log. Only the agent's calls: suggestions and ✨ titles are separate requests.
+ */
+function reportTurnUsage(turn) {
+  const text = U.formatTurn(turn);
+  if (!text) return;
+  addMessage('usage', '\u{1FA99} ' + text);
+  console.log('[Agent] Turn usage: ' + text + '.');
+  logSession('internal', 'tokens: ' + text);
+}
+
+async function runAgentLoop(signal) {
+  const turn = U.emptyTurn();
+  try {
+    await agentRounds(signal, turn);
+  } finally {
+    reportTurnUsage(turn);
+  }
+}
+
+async function agentRounds(signal, turn) {
   const isCopilot = state.model.startsWith('copilot:');
   syncSystemMessage();
 
@@ -2716,24 +2841,32 @@ async function runAgentLoop() {
   let previousTool = ''; // the step before the one being announced: why a `wait` waits
   for (let step = 0; step < maxSteps; step++) {
     // After a tool ran, the page may still be mounting the next view.
-    if (lastRound.length) await settleTools();
+    if (lastRound.length) await settleTools(signal);
     else await detectPageTools();
+    if (signal.aborted) return;
     const tools = state.tools.map(toOllamaTool);
     tools.unshift(NATIVE_WAIT_TOOL);
 
     const bubble = createAssistantBubble();
     let reply;
+    let usage = null;
+    const options = { signal, onUsage: (u) => { usage = u; } };
     try {
       if (isCopilot) {
-        reply = await copilotChat(state.messages, tools, (kind, delta) => bubble.append(kind, delta));
+        reply = await copilotChat(state.messages, tools, (kind, delta) => bubble.append(kind, delta), options);
       } else {
-        reply = await ollamaChat(state.messages, tools, (kind, delta) => bubble.append(kind, delta));
+        reply = await ollamaChat(state.messages, tools, (kind, delta) => bubble.append(kind, delta), options);
       }
     } catch (err) {
+      if (signal.aborted) {
+        bubble.stop();
+        return;
+      }
       if (err && err.status === 403) showStatus(CORS_HINT);
       bubble.fail('Failed to reach AI provider: ' + String((err && err.message) || err));
       return;
     }
+    U.addCall(turn, usage);
 
     bubble.finish(reply);
     state.messages.push(reply);
@@ -2755,15 +2888,28 @@ async function runAgentLoop() {
     }
     lastRound = [];
     for (const call of reply.tool_calls) {
+      // After a Stop every remaining call still gets its answer, without running.
+      if (signal.aborted) {
+        state.messages.push(toolResultMessage(call, STOPPED_BEFORE_CALL));
+        continue;
+      }
       announceGoal(goalForCall(reply, call, request, previousTool));
       previousTool = (call.function && call.function.name) || previousTool;
-      const result = await runToolCall(call);
+      const result = await runToolCall(call, signal);
       lastRound.push(result);
       state.messages.push(result);
     }
+    if (signal.aborted) return;
   }
 
   addMessage('note', 'Reached the limit of ' + maxSteps + ' tool rounds. You can change it in Settings → Agent Limits.');
+}
+
+function stopAgent() {
+  if (!agentAbort || agentAbort.signal.aborted) return;
+  console.log('[Agent] Stop requested by the user.');
+  agentAbort.abort();
+  updateSendState();
 }
 
 async function sendMessage() {
@@ -2772,6 +2918,8 @@ async function sendMessage() {
 
   clearSuggestions();
   state.busy = true;
+  agentAbort = new AbortController();
+  const signal = agentAbort.signal;
   els.input.value = '';
   autoGrow();
   updateSendState();
@@ -2781,10 +2929,11 @@ async function sendMessage() {
 
   try {
     await detectPageTools();
-    await runAgent();
+    await runAgent(signal);
   } finally {
     saveCurrentChatSession();
     state.busy = false;
+    agentAbort = null;
     updateSendState();
     els.input.focus();
   }
@@ -2808,12 +2957,17 @@ for (const button of document.querySelectorAll('.tab')) {
 
 els.input.addEventListener('input', () => { autoGrow(); updateSendState(); });
 els.input.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && agentAbort) {
+    event.preventDefault();
+    stopAgent();
+    return;
+  }
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     sendMessage();
   }
 });
-els.send.addEventListener('click', sendMessage);
+els.send.addEventListener('click', () => (agentAbort ? stopAgent() : sendMessage()));
 
 els.refreshModels.addEventListener('click', async () => {
   await fetchRemoteCopilotModels();
@@ -2902,7 +3056,7 @@ async function askModel(prompt, signal) {
   if (!state.model) throw new Error('No model selected.');
 
   if (state.model.startsWith('copilot:')) {
-    const reply = await copilotChat([{ role: 'user', content: prompt }], undefined, () => {});
+    const reply = await copilotChat([{ role: 'user', content: prompt }], undefined, () => {}, { signal });
     return (reply && reply.content) || '';
   }
 

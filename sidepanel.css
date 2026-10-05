@@ -273,6 +273,25 @@ body {
   text-align: center;
 }
 
+/* Tokens of the turn: a footnote under it, quieter than a note. */
+.msg--usage {
+  align-self: flex-end;
+  max-width: 100%;
+  padding: 0 4px;
+  background: transparent;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+/* An answer cut by Stop: what streamed in stays, marked as incomplete. */
+.msg--stopped { opacity: 0.7; border-style: dashed; }
+.msg--stopped::after {
+  content: ' [stopped]';
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
 .msg--error {
   align-self: stretch;
   background: var(--red-soft);
@@ -742,6 +761,7 @@ body {
 }
 
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.send-btn--stop { background: var(--red); }
 
 .schema-error {
   padding: 6px 8px;
