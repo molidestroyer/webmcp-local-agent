@@ -519,8 +519,10 @@ async function fetchCopilotQuota() {
   const headers = (auth) => ({
     'Authorization': auth,
     'Editor-Version': 'vscode/1.96.2',
-    'Editor-Plugin-Version': 'copilot/1.250.0',
-    'User-Agent': 'GitHubCopilot/1.250.0',
+    // The headers Win-CodexBar and CodexBar send to this endpoint.
+    'Editor-Plugin-Version': 'copilot-chat/0.26.7',
+    'User-Agent': 'GitHubCopilotChat/0.26.7',
+    'X-Github-Api-Version': '2025-04-01',
     'Accept': 'application/json',
   });
   let res = await fetch('https://api.github.com/copilot_internal/user', { headers: headers(`token ${oauthToken}`) });
@@ -536,9 +538,11 @@ async function fetchCopilotQuota() {
   const data = await res.json();
   if (!quotaDumped) {
     quotaDumped = true;
-    const { copilot_plan, access_type_sku, quota_reset_date, quota_reset_date_utc, quota_snapshots } = data || {};
-    diag('INFO', 'copilot_internal/user quota fields: ' + JSON.stringify(
-      { copilot_plan, access_type_sku, quota_reset_date, quota_reset_date_utc, quota_snapshots }).slice(0, 1500));
+    const { copilot_plan, access_type_sku, token_based_billing, quota_reset_date, quota_reset_date_utc,
+      quota_snapshots, monthly_quotas, limited_user_quotas } = data || {};
+    diag('INFO', 'copilot_internal/user quota fields: ' + JSON.stringify({ copilot_plan, access_type_sku,
+      token_based_billing, quota_reset_date, quota_reset_date_utc, quota_snapshots, monthly_quotas,
+      limited_user_quotas }).slice(0, 2000));
   }
   return data;
 }

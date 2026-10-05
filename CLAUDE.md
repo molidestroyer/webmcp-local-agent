@@ -499,9 +499,15 @@ lines. Two things it is easy to get wrong:
   report (skipped after Stop).
 - **Copilot balance**: `fetchCopilotQuota()` in the worker calls
   `api.github.com/copilot_internal/user` with the **OAuth** token (`token gho_…`), not the
-  session token. Undocumented; field names come from public reports of live accounts, so
-  `parseCopilotQuota()` treats every field as optional and shows less rather than a wrong
-  number. `token_based_billing` decides credits vs requests. The per-turn cost is the balance
+  session token. Undocumented; the shape and headers follow **Win-CodexBar**
+  (`nesszer/Win-CodexBar`, `rust/src/providers/copilot/api.rs`), which tracks it against live
+  accounts — read theirs before theorising, as with the upstream inspector. `parseCopilotQuota()`
+  treats every field as optional and shows less rather than a wrong number.
+  `token_based_billing` (top level, sometimes per snapshot) decides credits vs requests.
+  **A token-billed seat may report entitlement 0 on every snapshot**: that means "allowance not
+  reported", and the consumption lives only in `credits_used`. Never render it as "0 of 0
+  left". `placeholder: true` snapshots are skipped; the Free plan uses `limited_user_quotas` /
+  `monthly_quotas`. The per-turn cost is the balance
   difference (`quotaSpent()`), shown only when positive: GitHub's snapshot may lag. The worker
   dumps only the quota fields to Logs, once, never the login or organisations.
 

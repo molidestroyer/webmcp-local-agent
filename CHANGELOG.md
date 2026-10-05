@@ -19,7 +19,11 @@
   endpoint que usa VS Code; sin documentar). Con un modelo de Copilot, el informe del turno
   añade lo que costó, medido como diferencia de saldo antes/después. Si el saldo aún no se ha
   movido, no se muestra nada en vez de un 0. La primera consulta vuelca a Logs solo los campos
-  de cuota, para poder comprobar el formato con una cuenta real.
+  de cuota, para poder comprobar el formato con una cuenta real. El formato y las cabeceras
+  siguen a Win-CodexBar: un asiento Business facturado por tokens puede informar
+  `entitlement: 0` en todas las snapshots; entonces se muestra lo consumido
+  (`credits_used`) y «allowance not reported», nunca «0 of 0 left». El plan Free usa
+  `limited_user_quotas`/`monthly_quotas`.
 
 ## 0.7.13
 
