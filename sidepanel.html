@@ -449,7 +449,7 @@
       <div class="prompt-browser__foot">Click puts the prompt in the message box. Shift+Click sends it.</div>
     </div>
     <div class="composer__row">
-      <textarea id="input" rows="1" placeholder="Type a message… (Enter sends, Shift+Enter for a new line)"></textarea>
+      <textarea id="input" rows="2" placeholder="Type a message… (Enter sends, Shift+Enter for a new line)"></textarea>
       <button id="catalog-browse-btn" class="icon-btn" type="button" hidden title="Test cases from the catalog">
         <span aria-hidden="true">🧪</span>
         <span class="sr-only">Browse test cases</span>
@@ -462,6 +462,14 @@
         <span id="send-icon" aria-hidden="true">➤</span>
         <span id="send-label" class="sr-only">Send</span>
       </button>
+    </div>
+    <div id="usage-bar" class="usage-bar" hidden>
+      <button id="usage-quota" class="usage-bar__quota" type="button" hidden>
+        <span class="usage-bar__track" aria-hidden="true"><span id="usage-quota-fill" class="usage-bar__fill"></span></span>
+        <span id="usage-quota-text"></span>
+      </button>
+      <span id="usage-tokens" class="usage-bar__tokens" hidden
+            title="ctx: input tokens of the last model call, which every next call re-reads. thread: tokens sent and received in this conversation."></span>
     </div>
   </footer>
 

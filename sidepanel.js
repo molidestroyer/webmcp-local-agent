@@ -157,6 +157,11 @@ const els = {
   copilotPendingView: document.getElementById('copilot-pending-view'),
   copilotConnectedView: document.getElementById('copilot-connected-view'),
   copilotQuota: document.getElementById('copilot-quota'),
+  usageBar: document.getElementById('usage-bar'),
+  usageQuota: document.getElementById('usage-quota'),
+  usageQuotaFill: document.getElementById('usage-quota-fill'),
+  usageQuotaText: document.getElementById('usage-quota-text'),
+  usageTokens: document.getElementById('usage-tokens'),
   copilotQuotaRefresh: document.getElementById('copilot-quota-refresh'),
   copilotConnectBtn: document.getElementById('copilot-connect-btn'),
   copilotUserCode: document.getElementById('copilot-user-code'),
@@ -241,6 +246,8 @@ const state = {
   announcedContext: null,
   copilotConnected: false,
   copilotQuota: null,
+  copilotQuotaAt: 0, // when the quota was read, so a model switch can tell if it is stale
+  threadUsage: null, // tokens of the open thread, for the status bar (saved with the thread)
   agentTrace: [],
   copilotModels: [],
   copilotDeviceCode: null,
@@ -1950,6 +1957,8 @@ function renderCatalogActive() {
 /** Shared by the 🗑 button and the "reset on tab switch" setting. */
 function resetConversation() {
   state.messages = [{ role: 'system', content: systemMessageContent() }];
+  state.threadUsage = null; // a cleared conversation re-reads nothing
+  renderUsageBar();
   els.chat.textContent = '';
   const empty = document.createElement('div');
   empty.className = 'empty';
@@ -2994,6 +3003,10 @@ async function runAgentLoop(signal) {
       pageErrors: watch.pageErrors,
       limit: state.maxToolSteps,
     });
+    const answered = watch.rounds.filter((r) => r.usage);
+    state.threadUsage = U.addTurnToThread(state.threadUsage, turn,
+      answered.length ? answered[answered.length - 1].usage.input : null);
+    renderUsageBar();
     let usageText = U.formatTurn(turn);
     if (quotaBefore) usageText = [usageText, await turnQuotaText(await quotaBefore)].filter(Boolean).join(' \u00b7 ');
     renderTurnReport(report, usageText);
@@ -3170,6 +3183,8 @@ els.modelSelect.addEventListener('change', () => {
   state.model = els.modelSelect.value;
   chrome.storage.local.set({ selectedModel: state.model });
   updateSendState();
+  renderUsageBar();
+  if (state.model.startsWith('copilot:') && Date.now() - state.copilotQuotaAt > QUOTA_STALE_MS) loadCopilotQuota();
   if (state.autoSuggest && state.tools.length > 0) {
     generatePromptSuggestions();
   } else {
@@ -3455,6 +3470,7 @@ function saveCurrentChatSession() {
   if (session) {
     if (!session.titleCustom) session.title = title;
     session.messages = [...state.messages];
+    session.usage = state.threadUsage;
     session.updatedAt = Date.now();
     session.url = state.tabUrl;
     session.domain = domain;
@@ -3463,6 +3479,7 @@ function saveCurrentChatSession() {
       id: state.currentSessionId,
       title,
       messages: [...state.messages],
+      usage: state.threadUsage,
       updatedAt: Date.now(),
       url: state.tabUrl,
       domain,
@@ -3524,6 +3541,8 @@ function loadChatSession(session) {
   if (session.id !== state.currentSessionId) logSession('chat', 'Switched to thread "' + (session.title || 'Untitled') + '".');
   state.currentSessionId = session.id;
   state.messages = [...session.messages];
+  state.threadUsage = session.usage || null;
+  renderUsageBar();
 
   els.chat.textContent = '';
   replayConversation(session.messages);
@@ -3796,6 +3815,36 @@ function renderCopilotStatus() {
   }
 }
 
+const QUOTA_STALE_MS = 60 * 1000;
+
+/**
+ * The line under the composer: the Copilot allowance (only with a Copilot model) and the
+ * open thread's tokens. Derived from state on every call, never written from one place:
+ * the quota, the model and the thread each change on their own.
+ */
+function renderUsageBar() {
+  if (!els.usageBar) return;
+  const Copilot = globalThis.__WebMCPCopilotService;
+  const isCopilot = Boolean(state.model && state.model.startsWith('copilot:'));
+  const bar = isCopilot && Copilot ? Copilot.quotaBar(state.copilotQuota) : null;
+  els.usageQuota.hidden = !bar;
+  if (bar) {
+    els.usageQuotaText.textContent = bar.text;
+    const hasBar = bar.percentLeft !== null;
+    els.usageQuotaFill.parentElement.hidden = !hasBar;
+    if (hasBar) {
+      els.usageQuotaFill.style.width = bar.percentLeft.toFixed(1) + '%';
+      els.usageQuotaFill.dataset.level = bar.level;
+    }
+    els.usageQuota.title = 'Monthly usage: ' + (Copilot.formatCopilotQuota(state.copilotQuota) || 'no figures')
+      + (state.copilotQuota.plan ? ' \u00b7 plan ' + state.copilotQuota.plan : '') + '\nClick to open Settings.';
+  }
+  const tokens = U.formatThreadUsage(state.threadUsage);
+  els.usageTokens.hidden = !tokens;
+  els.usageTokens.textContent = tokens;
+  els.usageBar.hidden = !bar && !tokens;
+}
+
 /**
  * The monthly allowance, asked of GitHub (see fetchCopilotQuota() in background.js). Resolves
  * to the parsed quota or null: a failure here must never get in the way of chatting.
@@ -3810,6 +3859,8 @@ async function loadCopilotQuota() {
   }
   const quota = Copilot.parseCopilotQuota(answer.raw);
   state.copilotQuota = quota;
+  state.copilotQuotaAt = Date.now();
+  renderUsageBar();
   if (els.copilotQuota) {
     els.copilotQuota.textContent = quota
       ? 'Monthly usage: ' + (Copilot.formatCopilotQuota(quota) || 'no figures reported') + (quota.plan ? ' · plan ' + quota.plan : '')
@@ -3991,6 +4042,7 @@ if (els.copilotCopyCodeBtn) {
   } catch (_) { /* fall back to reacting to every window */ }
 
   await checkCopilotStatus();
+  if (els.usageQuota) els.usageQuota.addEventListener('click', () => setTab('settings'));
 
   const stored = await chrome.storage.local.get([
     'confirmTools',

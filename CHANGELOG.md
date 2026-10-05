@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.17
+
+- **Barra de estado bajo el cuadro de texto.** A la izquierda, con un modelo de Copilot, el
+  saldo del mes: `Copilot 3,846 / 4,000 credits · resets Nov 1` con una barra de lo que queda
+  (ámbar por debajo del 20 %, roja por debajo del 5 %); el tooltip trae la línea completa y el
+  plan, y un clic abre Ajustes. Plan ilimitado → «unlimited»; asiento sin límite publicado →
+  solo lo consumido, sin barra inventada. A la derecha, con cualquier proveedor, los tokens
+  del hilo: `ctx 5.2k` (entrada de la última llamada, lo que relee cada llamada siguiente) y
+  `thread 8.4k in · 120 out`. Se guardan con el hilo, vuelven al reabrirlo y se ponen a cero
+  con un hilo nuevo o al limpiar. En un panel estrecho los tokens pasan a una segunda línea.
+- **El cuadro de texto muestra dos líneas** en reposo y sigue creciendo como antes.
+
 ## 0.7.16
 
 - **El veredicto lo marca el problema más grave, y el título lo nombra.** Una pregunta del
