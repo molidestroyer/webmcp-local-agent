@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "engram": {
+      "type": "stdio",
+      "command": "C:\\Users\\molid\\AppData\\Local\\CasaAdminDock\\bin\\engram.exe",
+      "args": [
+        "mcp",
+        "--tools=agent"
+      ]
+    }
+  }
+}
