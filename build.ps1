@@ -36,6 +36,7 @@ $include = @(
   'lib',
   'README.md',
   'LICENSE',
+  'LICENSE-MIT',
   'icons',
   'demo'
 )
