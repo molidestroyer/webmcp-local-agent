@@ -364,4 +364,7 @@ before `ollama serve` (or `systemctl edit ollama` if it runs as a service).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[AGPL-3.0-or-later](LICENSE).
+
+Versions up to v0.7.17 were released under the MIT License. Code contributed under it keeps that
+notice, which ships with the extension in [LICENSE-MIT](LICENSE-MIT).
