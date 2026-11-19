@@ -190,3 +190,57 @@ test('the search takes /regex/ and also matches the urlPattern', () => {
   assert.deepStrictEqual(C.browsePrompts(C.DEMO_SAMPLE_CATALOG, { query: '/(/' }), []);
   assert.strictEqual(C.parseQuery('plain').error, null);
 });
+
+test('parseLocalCatalogText validates JSON and schema', () => {
+  const empty = C.parseLocalCatalogText('   ');
+  assert.strictEqual(empty.ok, false);
+  const badJson = C.parseLocalCatalogText('{bad');
+  assert.strictEqual(badJson.ok, false);
+  assert.ok(badJson.error.includes('JSON'));
+  const badSchema = C.parseLocalCatalogText('{"version":"1.0"}');
+  assert.strictEqual(badSchema.ok, false);
+  const ok = C.parseLocalCatalogText(JSON.stringify(C.DEMO_SAMPLE_CATALOG));
+  assert.strictEqual(ok.ok, true);
+  assert.strictEqual(ok.data.rules.length, C.DEMO_SAMPLE_CATALOG.rules.length);
+});
+
+test('normalizeTestCase and serializeTestCase round-trip Azure DevOps fields', () => {
+  const fromStr = C.normalizeTestCase('Run smoke test', 0);
+  assert.deepStrictEqual(fromStr, {
+    id: 'TC-01',
+    title: 'Run smoke test',
+    prompt: 'Run smoke test',
+    expectedResult: '',
+    priority: 'P2',
+    tags: [],
+    valid: true,
+  });
+
+  const ado = {
+    id: 'TC-99',
+    title: 'Checkout flow',
+    prompt: '1. Add item\n2. Pay',
+    priority: 'p1',
+    tags: ['smoke', 'e2e'],
+    expectedResult: 'Order confirmed',
+  };
+  const norm = C.normalizeTestCase(ado, 1);
+  assert.strictEqual(norm.priority, 'P1');
+  assert.deepStrictEqual(norm.tags, ['smoke', 'e2e']);
+  const ser = C.serializeTestCase(norm);
+  assert.deepStrictEqual(ser, {
+    id: 'TC-99',
+    title: 'Checkout flow',
+    prompt: '1. Add item\n2. Pay',
+    priority: 'P1',
+    tags: ['smoke', 'e2e'],
+    expectedResult: 'Order confirmed',
+  });
+});
+
+test('exportCatalogJson formats catalog and round-trips via parseLocalCatalogText', () => {
+  const json = C.exportCatalogJson(C.DEMO_SAMPLE_CATALOG);
+  const parsed = C.parseLocalCatalogText(json);
+  assert.strictEqual(parsed.ok, true);
+  assert.strictEqual(parsed.data.rules.length, C.DEMO_SAMPLE_CATALOG.rules.length);
+});

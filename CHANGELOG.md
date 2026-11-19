@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.0
+
+- **Carga de catálogo desde JSON local.** En *Settings → Knowledge & Prompt Catalog* se añade la
+  opción *Local JSON File* con selector de archivo y arrastrar/soltar, validado con el esquema
+  del catálogo y persistido en `chrome.storage.local`.
+- **Modo ventana maximizada (`⤢`).** Botón en la barra superior para desacoplar la extensión a
+  una ventana independiente maximizada manteniendo la conexión con la pestaña web objetivo
+  (`Target tab` + *Follow active*) y diseño responsivo para pantallas anchas.
+- **Gestor de Catálogo estilo Azure DevOps (`📋 Catalog`).** Nueva pestaña maestro-detalle con
+  *Test Suites* (`rules`) a la izquierda y tabla de *Test Cases* (`ID`, `Pri`, `Title & Steps`,
+  `Expected Result`, `Tags` y acciones `▶`, `✏️`, `🗑`) a la derecha, edición en modal y
+  exportación/copia a JSON.
+
 ## 0.7.17
 
 - **Barra de estado bajo el cuadro de texto.** A la izquierda, con un modelo de Copilot, el

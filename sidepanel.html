@@ -19,6 +19,16 @@
         <span aria-hidden="true">🔄</span>
         <span class="sr-only">Re-inspect the page</span>
       </button>
+      <button id="detach-btn" class="icon-btn" type="button" title="Open in maximized window">
+        <span aria-hidden="true">⤢</span>
+        <span class="sr-only">Open in maximized window</span>
+      </button>
+    </div>
+
+    <div id="detached-target-bar" class="detached-target-bar" hidden>
+      <span class="detached-target-bar__label">Target tab:</span>
+      <span id="detached-target-title" class="detached-target-bar__title">No page tab detected</span>
+      <button id="detached-target-pick" class="chat-header__btn" type="button" title="Switch target tab to the latest active browser tab">🔄 Follow active</button>
     </div>
 
     <div class="modelbar">
@@ -40,6 +50,7 @@
     <button class="tab" role="tab" type="button" data-tab="tools">🧰 Tools</button>
     <button class="tab" role="tab" type="button" data-tab="execute">▶ Execute</button>
     <button class="tab" role="tab" type="button" data-tab="history">📜 History</button>
+    <button class="tab" role="tab" type="button" data-tab="catalog">📋 Catalog</button>
     <button class="tab" role="tab" type="button" data-tab="logs">🐞 Logs</button>
     <button class="tab" role="tab" type="button" data-tab="settings">⚙️ Settings</button>
   </nav>
@@ -161,6 +172,126 @@
         No executions yet. Tools run from the Execute tab or called by the model in Chat
         show up here.
       </p>
+    </section>
+
+    <!-- ------------------------------------------------------------- Catalog -->
+    <section id="tab-catalog" class="pane" role="tabpanel">
+      <div class="catalog-toolbar">
+        <input id="catalog-studio-search" class="catalog-toolbar__search" type="search" placeholder="Filter suites or test cases…" autocomplete="off">
+        <div class="catalog-toolbar__actions">
+          <button id="catalog-add-suite-btn" class="btn-small" type="button" title="Create a new Test Suite">+ Suite</button>
+          <button id="catalog-add-case-btn" class="btn-small" type="button" title="Add a Test Case to the selected suite">+ Case</button>
+          <button id="catalog-export-btn" class="btn-small" type="button" title="Download catalog as JSON">⬇ Export</button>
+          <button id="catalog-copy-btn" class="btn-small" type="button" title="Copy catalog JSON to clipboard">📋 Copy</button>
+        </div>
+      </div>
+
+      <div id="catalog-studio" class="catalog-studio">
+        <aside class="catalog-suites-pane" aria-label="Test Suites">
+          <div class="catalog-pane-header">
+            <span>Test Suites</span>
+            <span id="catalog-suites-count" class="hint">0</span>
+          </div>
+          <div id="catalog-suites-list" class="catalog-suites-list"></div>
+        </aside>
+
+        <div class="catalog-cases-pane" aria-label="Test Cases">
+          <div id="catalog-suite-header" class="catalog-suite-header" hidden>
+            <div class="catalog-suite-header__top">
+              <div>
+                <div id="catalog-suite-title" class="catalog-suite-header__title"></div>
+                <div id="catalog-suite-id" class="catalog-suite-header__id"></div>
+              </div>
+              <div class="catalog-suite-header__btns">
+                <button id="catalog-edit-suite-btn" class="btn-small" type="button" title="Edit suite settings and business rules">✏️ Edit Suite</button>
+                <button id="catalog-delete-suite-btn" class="btn-small btn-small--danger" type="button" title="Delete this suite">🗑</button>
+              </div>
+            </div>
+            <div id="catalog-suite-criteria" class="catalog-suite-header__criteria"></div>
+            <details id="catalog-suite-ctx-box" class="rule-card__ctx-box" hidden>
+              <summary id="catalog-suite-ctx-summary">Business rules sent to the model</summary>
+              <div id="catalog-suite-ctx" class="rule-card__ctx"></div>
+            </details>
+          </div>
+
+          <div id="catalog-cases-table-wrap" class="catalog-cases-table-wrap"></div>
+        </div>
+      </div>
+
+      <!-- Inline Editor Modal for Suites and Test Cases -->
+      <div id="catalog-editor-modal" class="catalog-modal" hidden role="dialog" aria-modal="true" aria-labelledby="catalog-editor-heading">
+        <div class="catalog-modal__backdrop" id="catalog-editor-backdrop"></div>
+        <div class="catalog-modal__panel">
+          <div class="catalog-modal__head">
+            <h3 id="catalog-editor-heading" class="catalog-modal__title">Edit</h3>
+            <button id="catalog-editor-close" class="icon-btn" type="button" title="Close">✕</button>
+          </div>
+
+          <form id="catalog-suite-form" class="tool-form" hidden>
+            <div class="tool-form__field">
+              <label for="edit-suite-id">Suite ID</label>
+              <input type="text" id="edit-suite-id" required placeholder="e.g. checkout-e2e">
+            </div>
+            <div class="tool-form__field">
+              <label for="edit-suite-name">Suite Name</label>
+              <input type="text" id="edit-suite-name" required placeholder="e.g. Checkout E2E Suite">
+            </div>
+            <div class="tool-form__field">
+              <label for="edit-suite-url">URL Pattern (Regex)</label>
+              <input type="text" id="edit-suite-url" placeholder="e.g. example\.com/checkout">
+            </div>
+            <div class="tool-form__field">
+              <label for="edit-suite-tools">Required Tools (comma-separated)</label>
+              <input type="text" id="edit-suite-tools" placeholder="e.g. search_location, complete_booking">
+            </div>
+            <div class="tool-form__field">
+              <label for="edit-suite-context">System Context / Business Rules</label>
+              <textarea id="edit-suite-context" rows="6" placeholder="Instructions and preconditions sent to the AI model when this suite matches…"></textarea>
+            </div>
+            <div class="catalog-modal__foot">
+              <button type="button" id="edit-suite-cancel" class="btn-small">Cancel</button>
+              <button type="submit" class="btn-primary">Save Suite</button>
+            </div>
+          </form>
+
+          <form id="catalog-case-form" class="tool-form" hidden>
+            <div class="catalog-form-row">
+              <div class="tool-form__field">
+                <label for="edit-case-id">Test Case ID</label>
+                <input type="text" id="edit-case-id" placeholder="TC-01">
+              </div>
+              <div class="tool-form__field">
+                <label for="edit-case-priority">Priority</label>
+                <select id="edit-case-priority">
+                  <option value="P1">P1 · Critical</option>
+                  <option value="P2" selected>P2 · Normal</option>
+                  <option value="P3">P3 · Low</option>
+                </select>
+              </div>
+            </div>
+            <div class="tool-form__field">
+              <label for="edit-case-title">Title</label>
+              <input type="text" id="edit-case-title" required placeholder="Short descriptive title">
+            </div>
+            <div class="tool-form__field">
+              <label for="edit-case-tags">Tags (comma-separated)</label>
+              <input type="text" id="edit-case-tags" placeholder="e.g. smoke, e2e, booking">
+            </div>
+            <div class="tool-form__field">
+              <label for="edit-case-prompt">Prompt / Test Steps</label>
+              <textarea id="edit-case-prompt" rows="7" required placeholder="Step-by-step instructions or prompt sent to the agent…"></textarea>
+            </div>
+            <div class="tool-form__field">
+              <label for="edit-case-expected">Expected Result (Optional)</label>
+              <textarea id="edit-case-expected" rows="2" placeholder="What should be verified at the end…"></textarea>
+            </div>
+            <div class="catalog-modal__foot">
+              <button type="button" id="edit-case-cancel" class="btn-small">Cancel</button>
+              <button type="submit" class="btn-primary">Save Test Case</button>
+            </div>
+          </form>
+        </div>
+      </div>
     </section>
 
     <!-- ------------------------------------------------------------ Settings -->
@@ -321,9 +452,21 @@
             <span>Demo Sample Catalog (Built-in multi-country demo)</span>
           </label>
           <label class="setting-radio">
+            <input type="radio" name="catalog-source" value="local" id="catalog-source-local">
+            <span>Local JSON File (Load from disk)</span>
+          </label>
+          <label class="setting-radio">
             <input type="radio" name="catalog-source" value="remote" id="catalog-source-remote">
             <span>Custom Remote URL (GitHub Raw / PAT / Enterprise)</span>
           </label>
+        </div>
+
+        <div id="catalog-local-fields" class="tool-form" hidden>
+          <input type="file" id="catalog-file-input" accept=".json,application/json" hidden>
+          <div id="catalog-dropzone" class="catalog-dropzone" tabindex="0" role="button" aria-label="Choose or drop a catalog JSON file">
+            <span class="catalog-dropzone__title">📂 Choose or drop a <code>catalog.json</code> file</span>
+            <span id="catalog-local-filename" class="hint">No file selected</span>
+          </div>
         </div>
 
         <div id="catalog-remote-fields" class="tool-form" hidden>
@@ -348,13 +491,16 @@
         </div>
       </div>
 
-      <!-- Group 4: Catalog Rules Inspector -->
+      <!-- Group 4: Catalog Rules Inspector shortcut -->
       <div class="setting-card">
         <div class="field-label field-label--row">
           <span>Catalog: test suites and rules</span>
-          <span id="catalog-rules-count" class="hint">0 rules</span>
+          <span id="catalog-rules-count" class="hint">0 suites</span>
         </div>
-        <div id="catalog-rules-list" class="catalog-rules-list"></div>
+        <p class="setting-item__desc">
+          View, create, edit, and export Test Suites and Test Cases in the Azure DevOps-style Catalog Manager.
+        </p>
+        <button id="open-catalog-tab-btn" class="btn-wide" type="button">📋 Open Catalog Manager</button>
       </div>
       <!-- Group 4: GitHub Copilot Authentication -->
       <div class="setting-card">

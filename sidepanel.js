@@ -15,7 +15,7 @@ const HISTORY_LIMIT = 100;
 // Local models (Ollama) can take much longer than Copilot to answer a suggestion
 // request, especially on first load when the model has to be paged into VRAM.
 const SUGGESTION_TIMEOUT_MS = 45000;
-const TABS = ['chat', 'tools', 'execute', 'history', 'logs', 'settings'];
+const TABS = ['chat', 'tools', 'execute', 'history', 'catalog', 'logs', 'settings'];
 
 // Ollama answers 403 to any origin missing from OLLAMA_ORIGINS, and
 // chrome-extension:// is not allowed by default. Chrome does not attach an
@@ -142,7 +142,12 @@ const els = {
   recBtnLabel: document.getElementById('rec-btn-label'),
   catalogSourceNone: document.getElementById('catalog-source-none'),
   catalogSourceDemo: document.getElementById('catalog-source-demo'),
+  catalogSourceLocal: document.getElementById('catalog-source-local'),
   catalogSourceRemote: document.getElementById('catalog-source-remote'),
+  catalogLocalFields: document.getElementById('catalog-local-fields'),
+  catalogFileInput: document.getElementById('catalog-file-input'),
+  catalogDropzone: document.getElementById('catalog-dropzone'),
+  catalogLocalFilename: document.getElementById('catalog-local-filename'),
   catalogRemoteFields: document.getElementById('catalog-remote-fields'),
   catalogUrl: document.getElementById('catalog-url'),
   catalogToken: document.getElementById('catalog-token'),
@@ -150,7 +155,50 @@ const els = {
   catalogStatusBadge: document.getElementById('catalog-status-badge'),
   catalogStatusMeta: document.getElementById('catalog-status-meta'),
   catalogRulesCount: document.getElementById('catalog-rules-count'),
-  catalogRulesList: document.getElementById('catalog-rules-list'),
+  openCatalogTabBtn: document.getElementById('open-catalog-tab-btn'),
+  // detached / maximized mode
+  detachBtn: document.getElementById('detach-btn'),
+  detachedTargetBar: document.getElementById('detached-target-bar'),
+  detachedTargetTitle: document.getElementById('detached-target-title'),
+  detachedTargetPick: document.getElementById('detached-target-pick'),
+  // catalog studio (Azure DevOps-style)
+  catalogStudioSearch: document.getElementById('catalog-studio-search'),
+  catalogAddSuiteBtn: document.getElementById('catalog-add-suite-btn'),
+  catalogAddCaseBtn: document.getElementById('catalog-add-case-btn'),
+  catalogExportBtn: document.getElementById('catalog-export-btn'),
+  catalogCopyBtn: document.getElementById('catalog-copy-btn'),
+  catalogSuitesCount: document.getElementById('catalog-suites-count'),
+  catalogSuitesList: document.getElementById('catalog-suites-list'),
+  catalogSuiteHeader: document.getElementById('catalog-suite-header'),
+  catalogSuiteTitle: document.getElementById('catalog-suite-title'),
+  catalogSuiteId: document.getElementById('catalog-suite-id'),
+  catalogSuiteCriteria: document.getElementById('catalog-suite-criteria'),
+  catalogSuiteCtxBox: document.getElementById('catalog-suite-ctx-box'),
+  catalogSuiteCtxSummary: document.getElementById('catalog-suite-ctx-summary'),
+  catalogSuiteCtx: document.getElementById('catalog-suite-ctx'),
+  catalogEditSuiteBtn: document.getElementById('catalog-edit-suite-btn'),
+  catalogDeleteSuiteBtn: document.getElementById('catalog-delete-suite-btn'),
+  catalogCasesTableWrap: document.getElementById('catalog-cases-table-wrap'),
+  // catalog editor modal
+  catalogEditorModal: document.getElementById('catalog-editor-modal'),
+  catalogEditorBackdrop: document.getElementById('catalog-editor-backdrop'),
+  catalogEditorHeading: document.getElementById('catalog-editor-heading'),
+  catalogEditorClose: document.getElementById('catalog-editor-close'),
+  catalogSuiteForm: document.getElementById('catalog-suite-form'),
+  editSuiteId: document.getElementById('edit-suite-id'),
+  editSuiteName: document.getElementById('edit-suite-name'),
+  editSuiteUrl: document.getElementById('edit-suite-url'),
+  editSuiteTools: document.getElementById('edit-suite-tools'),
+  editSuiteContext: document.getElementById('edit-suite-context'),
+  editSuiteCancel: document.getElementById('edit-suite-cancel'),
+  catalogCaseForm: document.getElementById('catalog-case-form'),
+  editCaseId: document.getElementById('edit-case-id'),
+  editCasePriority: document.getElementById('edit-case-priority'),
+  editCaseTitle: document.getElementById('edit-case-title'),
+  editCaseTags: document.getElementById('edit-case-tags'),
+  editCasePrompt: document.getElementById('edit-case-prompt'),
+  editCaseExpected: document.getElementById('edit-case-expected'),
+  editCaseCancel: document.getElementById('edit-case-cancel'),
   // copilot settings
   copilotStatusBox: document.getElementById('copilot-status-box'),
   copilotDisconnectedView: document.getElementById('copilot-disconnected-view'),
@@ -239,8 +287,12 @@ const state = {
   catalogSourceMode: 'none',
   catalogUrl: '',
   catalogToken: '',
+  catalogLocalName: '',
   catalogData: null,
   catalogSyncedAt: 0,
+  selectedSuiteId: null,
+  isDetached: false,
+  targetTabId: null,
   activeSystemContext: '',
   activeRuleNames: [],
   announcedContext: null,
@@ -542,9 +594,78 @@ function renderModelOptions(placeholder) {
   }
 }
 
+// --- Detached / Maximized Window Mode ------------------------------------
+
+(function initDetachedMode() {
+  const params = new URLSearchParams(location.search);
+  const mode = params.get('detached');
+  state.isDetached = mode === 'window' || mode === 'tab';
+  const paramTabId = Number(params.get('targetTabId'));
+  if (Number.isFinite(paramTabId) && paramTabId > 0) {
+    state.targetTabId = paramTabId;
+  }
+  if (state.isDetached) {
+    document.body.classList.add('is-detached');
+    if (els.detachBtn) els.detachBtn.hidden = true;
+    if (els.detachedTargetBar) els.detachedTargetBar.hidden = false;
+  }
+})();
+
+function updateDetachedTargetLabel(tab) {
+  if (!state.isDetached || !els.detachedTargetTitle) return;
+  if (!tab) {
+    els.detachedTargetTitle.textContent = 'No browser page tab found';
+    els.detachedTargetTitle.title = '';
+    return;
+  }
+  let host = '';
+  try { host = new URL(tab.url).host; } catch (_) {}
+  els.detachedTargetTitle.textContent = (tab.title ? tab.title + ' — ' : '') + (host || tab.url || 'Tab #' + tab.id);
+  els.detachedTargetTitle.title = tab.url || '';
+}
+
+if (els.detachBtn) {
+  els.detachBtn.addEventListener('click', async () => {
+    await currentTabId();
+    const target = state.tabId ? `&targetTabId=${state.tabId}` : '';
+    const url = chrome.runtime.getURL(`sidepanel.html?detached=window${target}`);
+    await chrome.windows.create({ url, type: 'popup', state: 'maximized' });
+  });
+}
+
+if (els.detachedTargetPick) {
+  els.detachedTargetPick.addEventListener('click', async () => {
+    state.targetTabId = null;
+    await detectPageTools();
+  });
+}
+
 // --- Bridge to the page ----------------------------------------------------
 
 async function currentTabId() {
+  if (state.isDetached) {
+    let tab = null;
+    if (state.targetTabId) {
+      try {
+        const candidate = await chrome.tabs.get(state.targetTabId);
+        if (candidate && candidate.url && !candidate.url.startsWith('chrome-extension://')) {
+          tab = candidate;
+        }
+      } catch (_) {
+        state.targetTabId = null;
+      }
+    }
+    if (!tab) {
+      const normalTabs = await chrome.tabs.query({ active: true, windowType: 'normal' });
+      tab = normalTabs.find((t) => t.url && !t.url.startsWith('chrome-extension://')) || normalTabs[0] || null;
+      if (tab) state.targetTabId = tab.id;
+    }
+    state.tabId = tab ? tab.id : null;
+    state.tabUrl = tab ? tab.url : '';
+    updateDetachedTargetLabel(tab);
+    return state.tabId;
+  }
+
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   state.tabId = tab ? tab.id : null;
   state.tabUrl = tab ? tab.url : '';
@@ -601,10 +722,27 @@ function renderCatalogStatusBadge() {
     ? state.catalogData.rules
     : [];
 
+  if (els.catalogRulesCount) {
+    els.catalogRulesCount.textContent = rules.length === 1 ? '1 suite' : rules.length + ' suites';
+  }
+
   if (state.catalogSourceMode === 'demo') {
     els.catalogStatusBadge.className = 'chip chip--ok';
     els.catalogStatusBadge.textContent = 'Demo Catalog Active';
-    els.catalogStatusMeta.textContent = `${rules.length} sample rules loaded`;
+    els.catalogStatusMeta.textContent = `${rules.length} sample suites loaded`;
+    return;
+  }
+
+  if (state.catalogSourceMode === 'local') {
+    if (!rules.length && !state.catalogLocalName) {
+      els.catalogStatusBadge.className = 'chip pill--muted';
+      els.catalogStatusBadge.textContent = 'Local File Not Loaded';
+      els.catalogStatusMeta.textContent = 'Choose or drop a catalog.json file';
+      return;
+    }
+    els.catalogStatusBadge.className = 'chip chip--ok';
+    els.catalogStatusBadge.textContent = 'Local Catalog Active';
+    els.catalogStatusMeta.textContent = `${state.catalogLocalName || 'local.json'} · ${rules.length} suite${rules.length === 1 ? '' : 's'}`;
     return;
   }
 
@@ -623,96 +761,351 @@ function renderCatalogStatusBadge() {
       ? new Date(state.catalogSyncedAt).toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
       : null;
     els.catalogStatusMeta.textContent = when
-      ? `✔ Synced ${when} · ${rules.length} rules`
-      : `${rules.length} rules loaded`;
+      ? `✔ Synced ${when} · ${rules.length} suites`
+      : `${rules.length} suites loaded`;
     return;
   }
 
   els.catalogStatusBadge.className = 'chip pill--muted';
   els.catalogStatusBadge.textContent = 'No Catalog Active';
-  els.catalogStatusMeta.textContent = '0 rules loaded';
+  els.catalogStatusMeta.textContent = '0 suites loaded';
+}
+
+function ensureEditableCatalog() {
+  if (!state.catalogData || typeof state.catalogData !== 'object' || !Array.isArray(state.catalogData.rules)) {
+    state.catalogData = { version: '1.0', rules: [] };
+  }
+  return state.catalogData;
+}
+
+async function persistCatalogEdits() {
+  ensureEditableCatalog();
+  if (state.catalogSourceMode === 'none') {
+    state.catalogSourceMode = 'local';
+    if (!state.catalogLocalName) state.catalogLocalName = 'custom-catalog.json';
+    if (els.catalogSourceLocal) els.catalogSourceLocal.checked = true;
+    if (els.catalogLocalFields) els.catalogLocalFields.hidden = false;
+    if (els.catalogLocalFilename) els.catalogLocalFilename.textContent = state.catalogLocalName;
+  }
+  renderCatalogStatus();
+  renderCatalogStudio();
+  await chrome.storage.local.set({
+    catalogSourceMode: state.catalogSourceMode,
+    catalogLocalName: state.catalogLocalName,
+    webmcp_catalog_cache: state.catalogData,
+  });
+  detectPageTools();
 }
 
 function renderCatalogRulesInspector() {
-  if (!els.catalogRulesList) return;
-  els.catalogRulesList.textContent = '';
+  renderCatalogStudio();
+}
 
-  const catalog = state.catalogData || (C ? C.EMPTY_CATALOG : null);
-  const rules = catalog && Array.isArray(catalog.rules) ? catalog.rules : [];
+function renderCatalogStudio() {
+  if (!els.catalogSuitesList || !els.catalogCasesTableWrap) return;
 
+  const catalog = state.catalogData || (C ? C.EMPTY_CATALOG : { version: '1.0', rules: [] });
+  const rules = Array.isArray(catalog.rules) ? catalog.rules : [];
+  const query = els.catalogStudioSearch ? els.catalogStudioSearch.value.trim().toLowerCase() : '';
+
+  if (els.catalogSuitesCount) {
+    els.catalogSuitesCount.textContent = String(rules.length);
+  }
   if (els.catalogRulesCount) {
-    els.catalogRulesCount.textContent = rules.length === 1 ? '1 rule' : rules.length + ' rules';
+    els.catalogRulesCount.textContent = rules.length === 1 ? '1 suite' : rules.length + ' suites';
   }
 
-  if (!rules.length) {
+  const filteredRules = !query ? rules : rules.filter((r) => {
+    const suiteHit = (r.name || '').toLowerCase().includes(query)
+      || (r.id || '').toLowerCase().includes(query)
+      || (r.match && r.match.urlPattern && r.match.urlPattern.toLowerCase().includes(query));
+    if (suiteHit) return true;
+    const raw = Array.isArray(r.suggestedPrompts) ? r.suggestedPrompts : [];
+    return raw.some((entry, idx) => {
+      const tc = C.normalizeTestCase(entry, idx);
+      return tc.id.toLowerCase().includes(query)
+        || tc.title.toLowerCase().includes(query)
+        || tc.prompt.toLowerCase().includes(query)
+        || tc.tags.some((t) => t.toLowerCase().includes(query));
+    });
+  });
+
+  if (!filteredRules.some((r) => r.id === state.selectedSuiteId)) {
+    state.selectedSuiteId = filteredRules.length ? filteredRules[0].id : null;
+  }
+
+  els.catalogSuitesList.textContent = '';
+  if (!filteredRules.length) {
     const empty = document.createElement('div');
     empty.className = 'pane__empty';
-    empty.textContent = 'No rules loaded in catalog.';
-    els.catalogRulesList.appendChild(empty);
+    empty.textContent = rules.length ? 'No suites match your filter.' : 'No test suites yet. Click "+ Suite" or load a catalog in Settings.';
+    els.catalogSuitesList.appendChild(empty);
+  } else {
+    for (const rule of filteredRules) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'catalog-suite-item' + (rule.id === state.selectedSuiteId ? ' is-selected' : '');
+      const name = document.createElement('span');
+      name.className = 'catalog-suite-item__name';
+      name.textContent = rule.name || rule.id || 'Untitled suite';
+      const count = document.createElement('span');
+      count.className = 'catalog-suite-item__count';
+      const total = Array.isArray(rule.suggestedPrompts) ? rule.suggestedPrompts.length : 0;
+      count.textContent = String(total);
+      btn.append(name, count);
+      btn.addEventListener('click', () => {
+        state.selectedSuiteId = rule.id;
+        renderCatalogStudio();
+      });
+      els.catalogSuitesList.appendChild(btn);
+    }
+  }
+
+  const selectedSuite = rules.find((r) => r.id === state.selectedSuiteId) || null;
+  if (els.catalogAddCaseBtn) els.catalogAddCaseBtn.disabled = !selectedSuite;
+
+  if (!selectedSuite) {
+    if (els.catalogSuiteHeader) els.catalogSuiteHeader.hidden = true;
+    els.catalogCasesTableWrap.textContent = '';
+    const empty = document.createElement('div');
+    empty.className = 'pane__empty';
+    empty.textContent = rules.length
+      ? 'Select a Test Suite on the left to view its Test Cases.'
+      : 'No Test Cases to show. Load a JSON catalog in Settings or create a new Suite.';
+    els.catalogCasesTableWrap.appendChild(empty);
     return;
   }
 
-  for (const rule of rules) {
-    // Folded by default: a catalog is a list of test suites, read by name first. The
-    // business rules (often a page of text) and the cases open on demand.
-    const card = document.createElement('details');
-    card.className = 'rule-card';
-    const head = document.createElement('summary');
-    head.className = 'rule-card__head';
-
-    const title = document.createElement('div');
-    title.className = 'rule-card__title';
-    title.textContent = `${rule.name || 'Untitled rule'} (${rule.id || 'no-id'})`;
-
-    const match = document.createElement('div');
-    match.className = 'rule-card__match';
-    const urlPat = rule.match && rule.match.urlPattern ? `URL: ${rule.match.urlPattern}` : '';
-    const reqTools = rule.match && Array.isArray(rule.match.requiredTools) && rule.match.requiredTools.length
-      ? `Tools: ${rule.match.requiredTools.join(', ')}`
-      : '';
-    match.textContent = [urlPat, reqTools].filter(Boolean).join(' | ') || 'No filter criteria';
-
-    const prompts = C.listRulePrompts(rule);
-    const invalid = prompts.filter((p) => !p.valid).length;
-    const meta = document.createElement('div');
-    meta.className = 'rule-card__meta';
-    meta.textContent = (prompts.length === 1 ? '1 test case' : prompts.length + ' test cases')
-      + (invalid ? ` \u00b7 ${invalid} not usable` : '')
-      + (rule.systemContext ? ' \u00b7 business rules' : '');
-    head.append(title, match, meta);
-    card.appendChild(head);
-
-    if (rule.systemContext) {
-      const ctxBox = document.createElement('details');
-      ctxBox.className = 'rule-card__ctx-box';
-      const ctxHead = document.createElement('summary');
-      const lines = String(rule.systemContext).split('\n').filter((l) => l.trim()).length;
-      ctxHead.textContent = `Business rules sent to the model (${lines} line${lines === 1 ? '' : 's'})`;
-      const ctx = document.createElement('div');
-      ctx.className = 'rule-card__ctx';
-      ctx.textContent = rule.systemContext;
-      ctxBox.append(ctxHead, ctx);
-      card.appendChild(ctxBox);
+  if (els.catalogSuiteHeader) {
+    els.catalogSuiteHeader.hidden = false;
+    els.catalogSuiteTitle.textContent = selectedSuite.name || 'Untitled Suite';
+    els.catalogSuiteId.textContent = `Suite ID: ${selectedSuite.id}`;
+    els.catalogSuiteCriteria.textContent = '';
+    if (selectedSuite.match && selectedSuite.match.urlPattern) {
+      const p = document.createElement('span');
+      p.className = 'ado-pill';
+      p.textContent = `URL: ${selectedSuite.match.urlPattern}`;
+      els.catalogSuiteCriteria.appendChild(p);
     }
-
-    if (prompts.length) {
-      const list = document.createElement('ul');
-      list.className = 'rule-card__prompts';
-      for (const prompt of prompts) {
-        const item = document.createElement('li');
-        item.className = 'rule-card__prompt' + (prompt.valid ? '' : ' rule-card__prompt--invalid');
-        item.textContent = prompt.valid ? prompt.title : `Not usable as a test case: ${prompt.text || '(empty)'}`;
-        item.title = prompt.text;
-        list.appendChild(item);
-      }
-      card.appendChild(list);
+    if (selectedSuite.match && Array.isArray(selectedSuite.match.requiredTools) && selectedSuite.match.requiredTools.length) {
+      const p = document.createElement('span');
+      p.className = 'ado-pill';
+      p.textContent = `Tools: ${selectedSuite.match.requiredTools.join(', ')}`;
+      els.catalogSuiteCriteria.appendChild(p);
+    }
+    if (selectedSuite.systemContext) {
+      els.catalogSuiteCtxBox.hidden = false;
+      const lines = String(selectedSuite.systemContext).split('\n').filter((l) => l.trim()).length;
+      els.catalogSuiteCtxSummary.textContent = `Business rules / preconditions (${lines} line${lines === 1 ? '' : 's'})`;
+      els.catalogSuiteCtx.textContent = selectedSuite.systemContext;
     } else {
-      const none = document.createElement('div');
-      none.className = 'rule-card__none';
-      none.textContent = 'No test cases';
-      card.appendChild(none);
+      els.catalogSuiteCtxBox.hidden = true;
     }
-    els.catalogRulesList.appendChild(card);
+  }
+
+  const rawPrompts = Array.isArray(selectedSuite.suggestedPrompts) ? selectedSuite.suggestedPrompts : [];
+  const cases = rawPrompts
+    .map((entry, idx) => ({ idx, tc: C.normalizeTestCase(entry, idx) }))
+    .filter(({ tc }) => {
+      if (!query) return true;
+      return tc.id.toLowerCase().includes(query)
+        || tc.title.toLowerCase().includes(query)
+        || tc.prompt.toLowerCase().includes(query)
+        || tc.tags.some((t) => t.toLowerCase().includes(query));
+    });
+
+  els.catalogCasesTableWrap.textContent = '';
+  if (!cases.length) {
+    const empty = document.createElement('div');
+    empty.className = 'pane__empty';
+    empty.textContent = rawPrompts.length
+      ? 'No test cases in this suite match your filter.'
+      : 'No test cases in this suite yet. Click "+ Case" to add one.';
+    els.catalogCasesTableWrap.appendChild(empty);
+    return;
+  }
+
+  const table = document.createElement('table');
+  table.className = 'ado-table';
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr><th>ID</th><th>Pri</th><th>Title &amp; Steps</th><th>Actions</th></tr>';
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  for (const { idx, tc } of cases) {
+    const tr = document.createElement('tr');
+
+    const tdId = document.createElement('td');
+    tdId.className = 'ado-id';
+    tdId.textContent = tc.id;
+
+    const tdPri = document.createElement('td');
+    const priBadge = document.createElement('span');
+    priBadge.className = `ado-priority ado-priority--${tc.priority}`;
+    priBadge.textContent = tc.priority;
+    tdPri.appendChild(priBadge);
+
+    const tdBody = document.createElement('td');
+    const titleEl = document.createElement('div');
+    titleEl.className = 'ado-title';
+    titleEl.textContent = tc.title;
+    tdBody.appendChild(titleEl);
+
+    if (tc.prompt) {
+      const preview = document.createElement('div');
+      preview.className = 'ado-preview';
+      preview.textContent = tc.prompt;
+      preview.title = tc.prompt;
+      tdBody.appendChild(preview);
+    }
+    if (tc.expectedResult) {
+      const exp = document.createElement('div');
+      exp.className = 'ado-expected';
+      exp.textContent = 'Expected: ' + tc.expectedResult;
+      tdBody.appendChild(exp);
+    }
+    if (tc.tags.length) {
+      const tagsWrap = document.createElement('div');
+      tagsWrap.className = 'ado-tags';
+      for (const tag of tc.tags) {
+        const t = document.createElement('span');
+        t.className = 'ado-tag';
+        t.textContent = tag;
+        tagsWrap.appendChild(t);
+      }
+      tdBody.appendChild(tagsWrap);
+    }
+
+    const tdAct = document.createElement('td');
+    const act = document.createElement('div');
+    act.className = 'ado-actions';
+
+    const runBtn = document.createElement('button');
+    runBtn.type = 'button';
+    runBtn.className = 'btn-small';
+    runBtn.textContent = '▶';
+    runBtn.title = 'Load into Chat (Shift+Click to send immediately)';
+    runBtn.disabled = !tc.valid;
+    runBtn.addEventListener('click', (event) => {
+      setTab('chat');
+      useSuggestion(tc.prompt, event);
+    });
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'btn-small';
+    editBtn.textContent = '✏️';
+    editBtn.title = 'Edit test case';
+    editBtn.addEventListener('click', () => openCaseEditor(selectedSuite, idx));
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn-small btn-small--danger';
+    delBtn.textContent = '🗑';
+    delBtn.title = 'Delete test case';
+    delBtn.addEventListener('click', async () => {
+      selectedSuite.suggestedPrompts.splice(idx, 1);
+      await persistCatalogEdits();
+    });
+
+    act.append(runBtn, editBtn, delBtn);
+    tdAct.appendChild(act);
+
+    tr.append(tdId, tdPri, tdBody, tdAct);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  els.catalogCasesTableWrap.appendChild(table);
+}
+
+let editorState = { kind: null, suite: null, caseIndex: -1 };
+
+function closeCatalogEditor() {
+  if (!els.catalogEditorModal) return;
+  els.catalogEditorModal.hidden = true;
+  if (els.catalogSuiteForm) els.catalogSuiteForm.hidden = true;
+  if (els.catalogCaseForm) els.catalogCaseForm.hidden = true;
+  editorState = { kind: null, suite: null, caseIndex: -1 };
+}
+
+function openSuiteEditor(suite = null) {
+  if (!els.catalogEditorModal || !els.catalogSuiteForm) return;
+  editorState = { kind: 'suite', suite, caseIndex: -1 };
+  els.catalogEditorHeading.textContent = suite ? 'Edit Test Suite' : 'New Test Suite';
+  els.catalogCaseForm.hidden = true;
+  els.catalogSuiteForm.hidden = false;
+
+  const rules = ensureEditableCatalog().rules;
+  const defaultId = `suite-${rules.length + 1}`;
+  els.editSuiteId.value = suite ? (suite.id || '') : defaultId;
+  els.editSuiteName.value = suite ? (suite.name || '') : '';
+  els.editSuiteUrl.value = suite && suite.match ? (suite.match.urlPattern || '') : '';
+  els.editSuiteTools.value = suite && suite.match && Array.isArray(suite.match.requiredTools)
+    ? suite.match.requiredTools.join(', ')
+    : '';
+  els.editSuiteContext.value = suite ? (suite.systemContext || '') : '';
+
+  els.catalogEditorModal.hidden = false;
+  els.editSuiteName.focus();
+}
+
+function openCaseEditor(suite, caseIndex = -1) {
+  if (!suite || !els.catalogEditorModal || !els.catalogCaseForm) return;
+  editorState = { kind: 'case', suite, caseIndex };
+  els.catalogEditorHeading.textContent = caseIndex >= 0 ? 'Edit Test Case' : 'New Test Case';
+  els.catalogSuiteForm.hidden = true;
+  els.catalogCaseForm.hidden = false;
+
+  const list = Array.isArray(suite.suggestedPrompts) ? suite.suggestedPrompts : [];
+  const existing = caseIndex >= 0 ? C.normalizeTestCase(list[caseIndex], caseIndex) : null;
+  const nextNum = list.length + 1;
+
+  els.editCaseId.value = existing ? existing.id : `TC-${String(nextNum).padStart(2, '0')}`;
+  els.editCasePriority.value = existing ? existing.priority : 'P2';
+  els.editCaseTitle.value = existing ? existing.title : '';
+  els.editCaseTags.value = existing ? existing.tags.join(', ') : '';
+  els.editCasePrompt.value = existing ? existing.prompt : '';
+  els.editCaseExpected.value = existing ? existing.expectedResult : '';
+
+  els.catalogEditorModal.hidden = false;
+  els.editCaseTitle.focus();
+}
+
+async function loadLocalCatalogFile(file) {
+  if (!file || !C) return;
+  try {
+    const text = await file.text();
+    const res = C.parseLocalCatalogText(text);
+    if (!res.ok) {
+      if (els.catalogStatusBadge) {
+        els.catalogStatusBadge.className = 'chip chip--err';
+        els.catalogStatusBadge.textContent = 'Invalid JSON';
+      }
+      if (els.catalogStatusMeta) els.catalogStatusMeta.textContent = res.error;
+      return;
+    }
+    state.catalogSourceMode = 'local';
+    state.catalogLocalName = file.name;
+    state.catalogData = res.data;
+    state.selectedSuiteId = res.data.rules.length ? res.data.rules[0].id : null;
+    if (els.catalogSourceLocal) els.catalogSourceLocal.checked = true;
+    if (els.catalogLocalFields) els.catalogLocalFields.hidden = false;
+    if (els.catalogLocalFilename) els.catalogLocalFilename.textContent = file.name;
+
+    renderCatalogStatus();
+    renderCatalogStudio();
+    await chrome.storage.local.set({
+      catalogSourceMode: 'local',
+      catalogLocalName: file.name,
+      webmcp_catalog_cache: state.catalogData,
+    });
+    detectPageTools();
+  } catch (err) {
+    if (els.catalogStatusBadge) {
+      els.catalogStatusBadge.className = 'chip chip--err';
+      els.catalogStatusBadge.textContent = 'File Read Error';
+    }
+    if (els.catalogStatusMeta) els.catalogStatusMeta.textContent = String((err && err.message) || err);
   }
 }
 
@@ -721,13 +1114,15 @@ async function syncCatalog() {
 
   let mode = 'none';
   if (els.catalogSourceDemo && els.catalogSourceDemo.checked) mode = 'demo';
+  else if (els.catalogSourceLocal && els.catalogSourceLocal.checked) mode = 'local';
   else if (els.catalogSourceRemote && els.catalogSourceRemote.checked) mode = 'remote';
   state.catalogSourceMode = mode;
 
   if (mode === 'none') {
     state.catalogData = C.EMPTY_CATALOG;
+    state.selectedSuiteId = null;
     renderCatalogStatus();
-    renderCatalogRulesInspector();
+    renderCatalogStudio();
     await chrome.storage.local.set({
       catalogSourceMode: 'none',
       webmcp_catalog_cache: state.catalogData,
@@ -737,13 +1132,22 @@ async function syncCatalog() {
   }
 
   if (mode === 'demo') {
-    state.catalogData = C.DEMO_SAMPLE_CATALOG;
+    state.catalogData = JSON.parse(JSON.stringify(C.DEMO_SAMPLE_CATALOG));
+    state.selectedSuiteId = state.catalogData.rules.length ? state.catalogData.rules[0].id : null;
     renderCatalogStatus();
-    renderCatalogRulesInspector();
+    renderCatalogStudio();
     await chrome.storage.local.set({
       catalogSourceMode: 'demo',
       webmcp_catalog_cache: state.catalogData,
     });
+    detectPageTools();
+    return;
+  }
+
+  if (mode === 'local') {
+    renderCatalogStatus();
+    renderCatalogStudio();
+    await chrome.storage.local.set({ catalogSourceMode: 'local' });
     detectPageTools();
     return;
   }
@@ -780,10 +1184,11 @@ async function syncCatalog() {
     }
 
     state.catalogData = res.data;
+    state.selectedSuiteId = res.data.rules.length ? res.data.rules[0].id : null;
     state.catalogSyncedAt = Date.now();
     renderCatalogStatus();
 
-    renderCatalogRulesInspector();
+    renderCatalogStudio();
     await chrome.storage.local.set({
       catalogSourceMode: 'remote',
       catalogUrl: url,
@@ -3222,12 +3627,178 @@ if (els.resetChatOnTabToggle) {
 if (els.catalogSourceNone && els.catalogSourceDemo && els.catalogSourceRemote) {
   const toggleSourceFields = () => {
     const isRemote = els.catalogSourceRemote.checked;
+    const isLocal = Boolean(els.catalogSourceLocal && els.catalogSourceLocal.checked);
     if (els.catalogRemoteFields) els.catalogRemoteFields.hidden = !isRemote;
+    if (els.catalogLocalFields) els.catalogLocalFields.hidden = !isLocal;
     syncCatalog();
   };
   els.catalogSourceNone.addEventListener('change', toggleSourceFields);
   els.catalogSourceDemo.addEventListener('change', toggleSourceFields);
+  if (els.catalogSourceLocal) els.catalogSourceLocal.addEventListener('change', toggleSourceFields);
   els.catalogSourceRemote.addEventListener('change', toggleSourceFields);
+}
+
+if (els.catalogDropzone && els.catalogFileInput) {
+  els.catalogDropzone.addEventListener('click', () => els.catalogFileInput.click());
+  els.catalogDropzone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      els.catalogFileInput.click();
+    }
+  });
+  els.catalogDropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    els.catalogDropzone.classList.add('is-dragover');
+  });
+  els.catalogDropzone.addEventListener('dragleave', () => {
+    els.catalogDropzone.classList.remove('is-dragover');
+  });
+  els.catalogDropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    els.catalogDropzone.classList.remove('is-dragover');
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) loadLocalCatalogFile(file);
+  });
+  els.catalogFileInput.addEventListener('change', () => {
+    const file = els.catalogFileInput.files && els.catalogFileInput.files[0];
+    if (file) loadLocalCatalogFile(file);
+    els.catalogFileInput.value = '';
+  });
+}
+
+if (els.openCatalogTabBtn) {
+  els.openCatalogTabBtn.addEventListener('click', () => setTab('catalog'));
+}
+
+if (els.catalogStudioSearch) {
+  els.catalogStudioSearch.addEventListener('input', renderCatalogStudio);
+}
+if (els.catalogAddSuiteBtn) {
+  els.catalogAddSuiteBtn.addEventListener('click', () => openSuiteEditor(null));
+}
+if (els.catalogAddCaseBtn) {
+  els.catalogAddCaseBtn.addEventListener('click', () => {
+    const rules = ensureEditableCatalog().rules;
+    const suite = rules.find((r) => r.id === state.selectedSuiteId);
+    if (suite) openCaseEditor(suite, -1);
+  });
+}
+if (els.catalogEditSuiteBtn) {
+  els.catalogEditSuiteBtn.addEventListener('click', () => {
+    const rules = ensureEditableCatalog().rules;
+    const suite = rules.find((r) => r.id === state.selectedSuiteId);
+    if (suite) openSuiteEditor(suite);
+  });
+}
+if (els.catalogDeleteSuiteBtn) {
+  els.catalogDeleteSuiteBtn.addEventListener('click', async () => {
+    const catalog = ensureEditableCatalog();
+    const idx = catalog.rules.findIndex((r) => r.id === state.selectedSuiteId);
+    if (idx < 0) return;
+    catalog.rules.splice(idx, 1);
+    state.selectedSuiteId = catalog.rules.length ? catalog.rules[0].id : null;
+    await persistCatalogEdits();
+  });
+}
+if (els.catalogExportBtn) {
+  els.catalogExportBtn.addEventListener('click', () => {
+    if (!C) return;
+    const json = C.exportCatalogJson(state.catalogData);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = state.catalogLocalName && state.catalogLocalName.endsWith('.json')
+      ? state.catalogLocalName
+      : 'catalog.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+}
+if (els.catalogCopyBtn) {
+  els.catalogCopyBtn.addEventListener('click', async () => {
+    if (!C) return;
+    const json = C.exportCatalogJson(state.catalogData);
+    try {
+      await navigator.clipboard.writeText(json);
+      const orig = els.catalogCopyBtn.textContent;
+      els.catalogCopyBtn.textContent = '✔ Copied';
+      setTimeout(() => { els.catalogCopyBtn.textContent = orig; }, 1400);
+    } catch (_) {}
+  });
+}
+
+if (els.catalogEditorClose) els.catalogEditorClose.addEventListener('click', closeCatalogEditor);
+if (els.catalogEditorBackdrop) els.catalogEditorBackdrop.addEventListener('click', closeCatalogEditor);
+if (els.editSuiteCancel) els.editSuiteCancel.addEventListener('click', closeCatalogEditor);
+if (els.editCaseCancel) els.editCaseCancel.addEventListener('click', closeCatalogEditor);
+
+if (els.catalogSuiteForm) {
+  els.catalogSuiteForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const catalog = ensureEditableCatalog();
+    const id = els.editSuiteId.value.trim() || `suite-${catalog.rules.length + 1}`;
+    const name = els.editSuiteName.value.trim() || id;
+    const urlPattern = els.editSuiteUrl.value.trim();
+    const requiredTools = els.editSuiteTools.value
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const systemContext = els.editSuiteContext.value.trim();
+
+    const match = {};
+    if (urlPattern) match.urlPattern = urlPattern;
+    if (requiredTools.length) match.requiredTools = requiredTools;
+
+    if (editorState.suite) {
+      editorState.suite.id = id;
+      editorState.suite.name = name;
+      editorState.suite.match = Object.keys(match).length ? match : undefined;
+      if (systemContext) editorState.suite.systemContext = systemContext;
+      else delete editorState.suite.systemContext;
+    } else {
+      const created = {
+        id,
+        name,
+        ...(Object.keys(match).length ? { match } : {}),
+        ...(systemContext ? { systemContext } : {}),
+        suggestedPrompts: [],
+      };
+      catalog.rules.push(created);
+    }
+    state.selectedSuiteId = id;
+    closeCatalogEditor();
+    await persistCatalogEdits();
+  });
+}
+
+if (els.catalogCaseForm) {
+  els.catalogCaseForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!editorState.suite || !C) return;
+    if (!Array.isArray(editorState.suite.suggestedPrompts)) {
+      editorState.suite.suggestedPrompts = [];
+    }
+    const tags = els.editCaseTags.value
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const serialized = C.serializeTestCase({
+      id: els.editCaseId.value.trim(),
+      priority: els.editCasePriority.value,
+      title: els.editCaseTitle.value.trim(),
+      tags,
+      prompt: els.editCasePrompt.value,
+      expectedResult: els.editCaseExpected.value.trim(),
+    });
+    if (editorState.caseIndex >= 0) {
+      editorState.suite.suggestedPrompts[editorState.caseIndex] = serialized;
+    } else {
+      editorState.suite.suggestedPrompts.push(serialized);
+    }
+    closeCatalogEditor();
+    await persistCatalogEdits();
+  });
 }
 
 if (els.catalogSyncBtn) {
@@ -3785,6 +4356,17 @@ chrome.runtime.onMessage.addListener((message) => {
     return;
   }
   if (message.type === 'active-tab') {
+    if (state.isDetached) {
+      if (message.tabId) {
+        chrome.tabs.get(message.tabId).then((t) => {
+          if (t && t.url && !t.url.startsWith('chrome-extension://')) {
+            state.targetTabId = t.id;
+            detectPageToolsTwice();
+          }
+        }).catch(() => {});
+      }
+      return;
+    }
     if (message.windowId != null && state.windowId != null
         && message.windowId !== state.windowId) {
       return; // another window's side panel owns that one
@@ -4059,6 +4641,7 @@ if (els.copilotCopyCodeBtn) {
     'overlayCorner',
     'resetChatOnTabSwitch',
     'catalogSourceMode',
+    'catalogLocalName',
     'catalogUrl',
     'catalogToken',
     'catalogSyncedAt',
@@ -4099,30 +4682,39 @@ if (els.copilotCopyCodeBtn) {
   if (els.resetChatOnTabToggle) els.resetChatOnTabToggle.checked = state.resetChatOnTabSwitch;
 
   state.catalogSourceMode = stored.catalogSourceMode || 'none';
+  state.catalogLocalName = stored.catalogLocalName || '';
   state.catalogUrl = stored.catalogUrl || '';
   state.catalogToken = stored.catalogToken || '';
   state.catalogSyncedAt = stored.catalogSyncedAt || 0;
 
+  if (els.catalogRemoteFields) els.catalogRemoteFields.hidden = state.catalogSourceMode !== 'remote';
+  if (els.catalogLocalFields) els.catalogLocalFields.hidden = state.catalogSourceMode !== 'local';
+
   if (els.catalogSourceRemote && state.catalogSourceMode === 'remote') {
     els.catalogSourceRemote.checked = true;
-    if (els.catalogRemoteFields) els.catalogRemoteFields.hidden = false;
+  } else if (els.catalogSourceLocal && state.catalogSourceMode === 'local') {
+    els.catalogSourceLocal.checked = true;
   } else if (els.catalogSourceDemo && state.catalogSourceMode === 'demo') {
     els.catalogSourceDemo.checked = true;
-    if (els.catalogRemoteFields) els.catalogRemoteFields.hidden = true;
   } else if (els.catalogSourceNone) {
     els.catalogSourceNone.checked = true;
-    if (els.catalogRemoteFields) els.catalogRemoteFields.hidden = true;
   }
 
+  if (els.catalogLocalFilename) {
+    els.catalogLocalFilename.textContent = state.catalogLocalName || 'No file selected';
+  }
   if (els.catalogUrl) els.catalogUrl.value = state.catalogUrl;
   if (els.catalogToken) els.catalogToken.value = state.catalogToken;
 
   if (stored.webmcp_catalog_cache) {
     state.catalogData = stored.webmcp_catalog_cache;
   } else if (state.catalogSourceMode === 'demo' && C) {
-    state.catalogData = C.DEMO_SAMPLE_CATALOG;
+    state.catalogData = JSON.parse(JSON.stringify(C.DEMO_SAMPLE_CATALOG));
   } else if (C) {
     state.catalogData = C.EMPTY_CATALOG;
+  }
+  if (state.catalogData && Array.isArray(state.catalogData.rules) && state.catalogData.rules.length) {
+    state.selectedSuiteId = state.catalogData.rules[0].id;
   }
 
   renderCatalogStatus();
