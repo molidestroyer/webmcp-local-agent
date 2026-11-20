@@ -1811,3 +1811,38 @@ body {
     max-height: none;
   }
 }
+
+.thread-card__badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 6px;
+}
+.thread-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.thread-pill--rec { border-color: rgba(139, 92, 246, 0.4); color: var(--accent-text); }
+.thread-pill--err { border-color: rgba(248, 113, 113, 0.4); color: var(--red); }
+.thread-card__debug {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 3px 5px;
+  font-size: 12px;
+}
+.thread-card__debug:hover {
+  border-color: var(--border);
+  background: var(--card-2);
+  color: var(--text);
+}

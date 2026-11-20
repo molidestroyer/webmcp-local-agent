@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.1
+
+- **Dashboard de Debug de Conversación (`debug.html`).** Nueva vista independiente en pestaña
+  aparte accesible desde la cabecera del chat (`🩺`), la lista de conversaciones o `🐞 Logs`.
+- **Consumo de tokens y señales WebMCP.** Barra visual con reparto por componente (`sys`, `cat`,
+  `tools`, `hist`, `res`), latencias, `nudges`, tabla de llamadas a tools y errores de consola
+  de la página separados de los logs de la extensión.
+- **Grabaciones vinculadas al chat.** Índice de vídeos `.webm` por `sessionId` con reproductor
+  inline + `.log` sincronizado (si hay *Recordings Folder*) o acceso rápido en Descargas.
+- **Todo copiable para otro agente.** Exportación en un clic a Markdown (`📋 Copy Full Report` /
+  `⬇ .md`) y copia individual por sección.
+
 ## 0.8.0
 
 - **Carga de catálogo desde JSON local.** En *Settings → Knowledge & Prompt Catalog* se añade la

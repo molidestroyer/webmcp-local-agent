@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WebMCP Conversation Debug Dashboard</title>
+  <link rel="stylesheet" href="debug.css">
+</head>
+<body>
+  <header class="dbg-topbar">
+    <div class="dbg-topbar__left">
+      <span class="dbg-logo" aria-hidden="true">🩺</span>
+      <div>
+        <h1 class="dbg-title">WebMCP Conversation Debug Dashboard</h1>
+        <div id="dbg-subtitle" class="dbg-subtitle">Loading telemetry…</div>
+      </div>
+    </div>
+
+    <div class="dbg-topbar__controls">
+      <label class="sr-only" for="session-select">Conversation</label>
+      <select id="session-select" class="dbg-select" aria-label="Select conversation"></select>
+      <button id="refresh-btn" class="dbg-btn" type="button" title="Reload telemetry from storage">🔄 Refresh</button>
+      <button id="copy-all-btn" class="dbg-btn dbg-btn--primary" type="button" title="Copy full Markdown debug report for an AI agent">📋 Copy Full Report (MD)</button>
+      <button id="download-md-btn" class="dbg-btn" type="button" title="Download Markdown report">⬇ .md</button>
+    </div>
+  </header>
+
+  <main class="dbg-main">
+    <!-- KPI Strip -->
+    <section class="dbg-kpis" aria-label="Summary metrics">
+      <div class="kpi-card">
+        <div class="kpi-card__label">Provider Tokens</div>
+        <div id="kpi-tokens" class="kpi-card__value">—</div>
+        <div id="kpi-tokens-sub" class="kpi-card__sub">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-card__label">Turns &amp; Rounds</div>
+        <div id="kpi-turns" class="kpi-card__value">—</div>
+        <div id="kpi-turns-sub" class="kpi-card__sub">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-card__label">WebMCP Tool Calls</div>
+        <div id="kpi-tools" class="kpi-card__value">—</div>
+        <div id="kpi-tools-sub" class="kpi-card__sub">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-card__label">Page Console Errors</div>
+        <div id="kpi-errors" class="kpi-card__value">—</div>
+        <div id="kpi-errors-sub" class="kpi-card__sub">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-card__label">Linked Recordings</div>
+        <div id="kpi-recs" class="kpi-card__value">—</div>
+        <div id="kpi-recs-sub" class="kpi-card__sub">—</div>
+      </div>
+    </section>
+
+    <!-- Token Footprint & WebMCP Optimization Signals -->
+    <section class="dbg-card" aria-label="Token footprint breakdown">
+      <div class="dbg-card__head">
+        <h2>Prompt Token Footprint &amp; WebMCP Optimization Signals</h2>
+        <button id="copy-tokens-btn" class="dbg-btn dbg-btn--sm" type="button">📋 Copy Breakdown</button>
+      </div>
+      <div id="token-bar" class="token-bar" aria-label="Stacked prompt token bar"></div>
+      <div id="token-legend" class="token-legend"></div>
+      <ul id="optimization-hints" class="hints-list"></ul>
+    </section>
+
+    <!-- Section Tabs -->
+    <nav class="dbg-tabs" role="tablist">
+      <button class="dbg-tab is-active" type="button" role="tab" data-panel="turns">🎯 Goals &amp; Turns</button>
+      <button class="dbg-tab" type="button" role="tab" data-panel="tools">🧰 Tool Calls</button>
+      <button class="dbg-tab" type="button" role="tab" data-panel="console">⚠️ Console &amp; Logs</button>
+      <button class="dbg-tab" type="button" role="tab" data-panel="recordings">🎬 Recordings</button>
+      <button class="dbg-tab" type="button" role="tab" data-panel="transcript">💬 Transcript</button>
+    </nav>
+
+    <!-- Panel 1: Goals & Turns -->
+    <section id="panel-turns" class="dbg-panel is-active">
+      <div class="dbg-card">
+        <div class="dbg-card__head">
+          <h2>Goals, Verdicts &amp; Model Rounds</h2>
+          <button id="copy-trace-btn" class="dbg-btn dbg-btn--sm" type="button">📋 Copy Trace</button>
+        </div>
+        <div id="turns-list" class="turns-list"></div>
+      </div>
+    </section>
+
+    <!-- Panel 2: Tool Calls -->
+    <section id="panel-tools" class="dbg-panel">
+      <div class="dbg-card">
+        <div class="dbg-card__head">
+          <h2>WebMCP Tool Calls &amp; Payloads</h2>
+          <button id="copy-tools-btn" class="dbg-btn dbg-btn--sm" type="button">📋 Copy Tool Calls</button>
+        </div>
+        <div id="tools-table-wrap" class="table-wrap"></div>
+      </div>
+    </section>
+
+    <!-- Panel 3: Console & Diagnostics -->
+    <section id="panel-console" class="dbg-panel">
+      <div class="dbg-split">
+        <div class="dbg-card">
+          <div class="dbg-card__head">
+            <h2>Page Console Errors &amp; Warnings</h2>
+            <button id="copy-console-btn" class="dbg-btn dbg-btn--sm" type="button">📋 Copy Page Console</button>
+          </div>
+          <div id="page-console-list" class="console-list"></div>
+        </div>
+        <div class="dbg-card">
+          <div class="dbg-card__head">
+            <h2>Extension Diagnostic Logs</h2>
+            <button id="copy-extlogs-btn" class="dbg-btn dbg-btn--sm" type="button">📋 Copy Ext Logs</button>
+          </div>
+          <pre id="ext-logs-pre" class="dbg-pre"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Panel 4: Recordings -->
+    <section id="panel-recordings" class="dbg-panel">
+      <div class="dbg-card">
+        <div class="dbg-card__head">
+          <h2>Linked Video Recordings &amp; Session Logs</h2>
+          <div class="dbg-card__actions">
+            <label class="dbg-check">
+              <input type="checkbox" id="show-all-recs">
+              <span>Show recordings from all chats</span>
+            </label>
+            <button id="grant-folder-btn" class="dbg-btn dbg-btn--sm" type="button" hidden>🔓 Grant Folder Access</button>
+          </div>
+        </div>
+        <div class="rec-studio">
+          <div id="rec-list" class="rec-list"></div>
+          <div id="rec-viewer" class="rec-viewer">
+            <div id="rec-viewer-empty" class="dbg-empty">Select a recording on the left to play the video or inspect its session log.</div>
+            <div id="rec-player-box" class="rec-player-box" hidden>
+              <div class="rec-player-head">
+                <div>
+                  <div id="rec-player-title" class="rec-player-title"></div>
+                  <div id="rec-player-meta" class="rec-player-meta"></div>
+                </div>
+                <div class="rec-player-actions">
+                  <button id="rec-show-btn" class="dbg-btn dbg-btn--sm" type="button" hidden>📂 Show in Folder</button>
+                  <button id="rec-open-btn" class="dbg-btn dbg-btn--sm" type="button" hidden>▶ Open File</button>
+                  <button id="rec-copy-log-btn" class="dbg-btn dbg-btn--sm" type="button">📋 Copy .log</button>
+                </div>
+              </div>
+              <video id="rec-video" class="rec-video" controls hidden></video>
+              <div id="rec-video-note" class="dbg-empty" hidden></div>
+              <pre id="rec-log-pre" class="dbg-pre rec-log-pre"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Panel 5: Transcript -->
+    <section id="panel-transcript" class="dbg-panel">
+      <div class="dbg-card">
+        <div class="dbg-card__head">
+          <h2>Conversation Transcript</h2>
+          <button id="copy-transcript-btn" class="dbg-btn dbg-btn--sm" type="button">📋 Copy Transcript</button>
+        </div>
+        <div id="transcript-list" class="transcript-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="lib/recordings-folder.js"></script>
+  <script src="lib/agent-trace.js"></script>
+  <script src="lib/debug-report.js"></script>
+  <script src="debug.js"></script>
+</body>
+</html>

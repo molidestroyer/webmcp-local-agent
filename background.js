@@ -300,9 +300,9 @@ async function stopRecording({ download = true } = {}) {
     diag('INFO', `Recording ready for the panel (${Math.round(answer.size / 1024)} KB).`, 'Rec/SW');
     return { size: answer.size, url: answer.url, stem };
   }
-  await chrome.downloads.download({ url: answer.url, filename: `webmcp-agent/${stem}.webm`, saveAs: false });
+  const downloadId = await chrome.downloads.download({ url: answer.url, filename: `webmcp-agent/${stem}.webm`, saveAs: false });
   diag('INFO', `Recording saved (${Math.round(answer.size / 1024)} KB).`, 'Rec/SW');
-  return { size: answer.size };
+  return { size: answer.size, stem, downloadId };
 }
 
 // A navigation wipes the content script's state; put the cursor back.

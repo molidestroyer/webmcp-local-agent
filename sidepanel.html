@@ -86,6 +86,9 @@
             <span id="chat-thread-domain" class="chat-header__domain"></span>
           </div>
           <div class="chat-header__side chat-header__side--end">
+            <button id="chat-debug-btn" class="chat-header__btn" type="button" title="Open Conversation Debug Dashboard (tokens, console errors, recordings)">
+              🩺
+            </button>
             <button id="rec-btn" class="chat-header__btn rec-btn" type="button" hidden title="Start recording this session">
               <span class="rec-btn__dot"></span><span id="rec-btn-label">Rec</span>
             </button>
@@ -559,6 +562,7 @@
       <div class="logs-header">
         <span class="field-label">Diagnostic Logs & API Calls</span>
         <div class="logs-actions">
+          <button id="open-debug-dashboard-btn" class="btn-small" type="button" title="Open standalone Debug Dashboard in a new tab">🩺 Debug Dashboard</button>
           <button id="trace-copy-btn" class="btn-small" type="button" title="A compact summary of the last agent turns: tokens per model call, what each prompt was made of, and what came back. Small enough to paste into a chat for a review.">🧭 Copy agent trace</button>
           <button id="logs-copy-btn" class="btn-small" type="button">📋 Copy Logs</button>
           <button id="logs-clear-btn" class="btn-small btn-cancel" type="button">🗑 Clear</button>
@@ -629,6 +633,7 @@
   <script src="lib/token-usage.js"></script>
   <script src="lib/turn-report.js"></script>
   <script src="lib/agent-trace.js"></script>
+  <script src="lib/debug-report.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

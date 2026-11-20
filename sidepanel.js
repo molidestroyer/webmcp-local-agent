@@ -226,7 +226,9 @@ const els = {
   logsOutput: document.getElementById('logs-output'),
   logsCopyBtn: document.getElementById('logs-copy-btn'),
   traceCopyBtn: document.getElementById('trace-copy-btn'),
+  openDebugDashboardBtn: document.getElementById('open-debug-dashboard-btn'),
   logsClearBtn: document.getElementById('logs-clear-btn'),
+  chatDebugBtn: document.getElementById('chat-debug-btn'),
   // tools
   toolsList: document.getElementById('tools-list'),
   toolsEmpty: document.getElementById('tools-empty'),
@@ -301,6 +303,8 @@ const state = {
   copilotQuotaAt: 0, // when the quota was read, so a model switch can tell if it is stale
   threadUsage: null, // tokens of the open thread, for the status bar (saved with the thread)
   agentTrace: [],
+  recordingsIndex: [],
+  pageConsoleHistory: [],
   copilotModels: [],
   copilotDeviceCode: null,
   copilotDeviceExpiresAt: 0,
@@ -383,6 +387,7 @@ const S = globalThis.__WebMCPLocalAgentSchema;
 const U = globalThis.__WebMCPTokenUsage;
 const TR = globalThis.__WebMCPTurnReport;
 const AT = globalThis.__WebMCPAgentTrace;
+const DR = globalThis.__WebMCPDebugReport;
 const R = globalThis.__WebMCPRecorder;
 const tokens = S.tokens;
 const humanize = S.humanize;
@@ -2727,7 +2732,16 @@ async function runToolCall(call, signal) {
   // traced here, so the session log and the on-page banner see all of them alike.
   const hudId = state.showVirtualCursor ? ++hudSeq : 0;
   const trace = ({ ok, output, ms, note }) => {
-    if (turnWatch) turnWatch.tools.push({ name: String(name || '(unnamed)'), ok, note, output: String(output || '') });
+    if (turnWatch) {
+      turnWatch.tools.push({
+        name: String(name || '(unnamed)'),
+        ok,
+        note,
+        ms: typeof ms === 'number' ? Math.round(ms) : undefined,
+        args,
+        output: String(output || '').slice(0, 1500),
+      });
+    }
     const entry = SL.toolEntry({ name: String(name || '(unnamed)'), args, ok, output, ms, note });
     logSession('tool', entry.text, undefined, entry.detail);
     if (hudId) bridge('hud', { phase: 'end', id: hudId, ok });  // corner not needed: the card exists already
@@ -2912,8 +2926,32 @@ async function startSessionCapture() {
 
 async function endSessionCapture() {
   if (!sessionLive) return;
-  await stopSessionRecording();
-  await saveSessionLog();
+  const startedAt = sessionStartedAt || Date.now();
+  const stem = sessionStem;
+  const url = (sessionLog && sessionLog.url) || state.tabUrl || '';
+  const pageErrors = sessionLog ? sessionLog.lines.filter((l) => l.kind === 'error').length : 0;
+  const recMeta = await stopSessionRecording();
+  const logText = await saveSessionLog();
+  if (recMeta && DR && (recMeta.stem || stem)) {
+    let domain = '';
+    try { if (url) domain = new URL(url).hostname; } catch (_) {}
+    state.recordingsIndex = DR.appendRecordingMeta(state.recordingsIndex, {
+      sessionId: state.currentSessionId,
+      stem: recMeta.stem || stem,
+      storage: recMeta.where || 'downloads',
+      downloadId: typeof recMeta.downloadId === 'number' ? recMeta.downloadId : null,
+      sizeBytes: recMeta.size || 0,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      startedAt,
+      endedAt: Date.now(),
+      url,
+      domain,
+      pageErrors,
+      logText: typeof logText === 'string' ? logText.slice(0, 12000) : '',
+    });
+    chrome.storage.local.set({ recordingsIndex: state.recordingsIndex }).catch(() => {});
+    renderChatHeader();
+  }
   updateRecButton();
 }
 
@@ -3046,19 +3084,21 @@ async function saveSessionLog() {
   const log = sessionLog;
   const stem = sessionStem;
   sessionLog = sessionStem = null;
-  if (!log || !stem) return;
+  if (!log || !stem) return '';
   // Leave the page as we found it, but never make the file wait for it: when the recorded
   // tab was just closed this round trip hangs on the bridge (2 s with no port, up to the
   // 35 s bridge timeout with a dying one), and the .log arrived long after the video, or not
   // at all if the panel closed first.
   syncConsoleCapture();
+  const formatted = SL.formatSessionLog(log, Date.now());
   try {
-    const blob = new Blob([SL.formatSessionLog(log, Date.now())], { type: 'text/plain' });
-    const where = await saveRecordingFile(blob, `${stem}.log`, await resolveRecordingsDir());
-    console.log('[Rec] Session log saved to ' + where + ' (' + log.lines.length + ' line(s)).');
+    const blob = new Blob([formatted], { type: 'text/plain' });
+    const res = await saveRecordingFile(blob, `${stem}.log`, await resolveRecordingsDir());
+    console.log('[Rec] Session log saved to ' + res.where + ' (' + log.lines.length + ' line(s)).');
   } catch (err) {
     showStatus('Could not save the session log: ' + String((err && err.message) || err));
   }
+  return formatted;
 }
 
 /** Opens Chrome's tab picker. Has to run here: the panel is a window and holds the gesture. */
@@ -3200,16 +3240,16 @@ async function saveRecordingFile(source, name, dir) {
     try {
       const data = typeof source === 'string' ? await (await fetch(source)).blob() : source;
       await Folder.writeFile(dir, name, data);
-      return 'folder';
+      return { where: 'folder', downloadId: null };
     } catch (err) {
       console.warn('[Rec] Could not write into the recordings folder, using Downloads: ' + String((err && err.message) || err));
     }
   }
   const url = typeof source === 'string' ? source : URL.createObjectURL(source);
-  await chrome.downloads.download({ url, filename: `webmcp-agent/${name}`, saveAs: false });
+  const downloadId = await chrome.downloads.download({ url, filename: `webmcp-agent/${name}`, saveAs: false });
   // The download reads the blob asynchronously; revoke it afterwards.
   if (typeof source !== 'string') setTimeout(() => URL.revokeObjectURL(url), 60000);
-  return 'downloads';
+  return { where: 'downloads', downloadId: typeof downloadId === 'number' ? downloadId : null };
 }
 
 async function stopPanelRecording() {
@@ -3221,11 +3261,13 @@ async function stopPanelRecording() {
   }
   try {
     const { url, size } = await recorder.stop();
-    const where = await saveRecordingFile(url, `${info.stem}.webm`, await resolveRecordingsDir());
-    console.log('[Rec] Recording saved to ' + where + ' (' + Math.round(size / 1024) + ' KB).');
+    const res = await saveRecordingFile(url, `${info.stem}.webm`, await resolveRecordingsDir());
+    console.log('[Rec] Recording saved to ' + res.where + ' (' + Math.round(size / 1024) + ' KB).');
     setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return { stem: info.stem, where: res.where, downloadId: res.downloadId, size };
   } catch (err) {
     showStatus('Could not save the recording: ' + String((err && err.message) || err));
+    return null;
   }
 }
 
@@ -3251,17 +3293,26 @@ async function stopSessionRecording() {
     .catch((err) => ({ success: false, error: String((err && err.message) || err) }));
   if (!reply || !reply.success) {
     showStatus('Could not save the recording: ' + ((reply && reply.error) || 'unknown error'));
-    return;
+    return null;
   }
+  if (reply.skipped) return null;
   // With a folder the worker hands the video over instead of downloading it.
   if (dir && reply.url) {
     try {
-      const where = await saveRecordingFile(reply.url, `${reply.stem}.webm`, dir);
-      console.log('[Rec] Recording saved to ' + where + '.');
+      const res = await saveRecordingFile(reply.url, `${reply.stem}.webm`, dir);
+      console.log('[Rec] Recording saved to ' + res.where + '.');
+      return { stem: reply.stem, where: res.where, downloadId: res.downloadId, size: reply.size || 0 };
     } catch (err) {
       showStatus('Could not save the recording: ' + String((err && err.message) || err));
+      return null;
     }
   }
+  return {
+    stem: reply.stem || '',
+    where: 'downloads',
+    downloadId: typeof reply.downloadId === 'number' ? reply.downloadId : null,
+    size: reply.size || 0,
+  };
 }
 
 const MAX_NUDGES = 10;
@@ -3370,14 +3421,19 @@ function recordTrace(watch, report, end) {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
   state.agentTrace = AT.appendTurn(state.agentTrace, {
+    sessionId: state.currentSessionId,
+    tabUrl: state.tabUrl || '',
     at: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`,
     model: state.model,
+    goal: currentGoal || lastUserRequest(),
     request: lastUserRequest(),
     end,
     verdict: report.level + ' "' + report.title + '"',
     nudges: watch.nudges,
     tools: watch.tools.length,
+    toolCalls: watch.tools.slice(0, 50),
     pageErrors: watch.pageErrors.filter((e) => e.level !== 'warn').length,
+    errors: watch.pageErrors.slice(0, TURN_ERRORS_MAX),
     rounds: watch.rounds,
   });
   chrome.storage.local.set({ agentTrace: state.agentTrace }).catch(() => {});
@@ -3883,6 +3939,20 @@ function renderChatHeader() {
   if (els.threadsDomain) {
     els.threadsDomain.textContent = domain || 'this page';
   }
+  if (els.chatDebugBtn) {
+    const recCount = (state.recordingsIndex || []).filter((r) => r.sessionId === state.currentSessionId).length;
+    els.chatDebugBtn.textContent = recCount > 0 ? `🩺 🎬${recCount}` : '🩺';
+  }
+}
+
+async function openDebugDashboard(sessionId) {
+  saveCurrentChatSession();
+  const extLogs = els.logsOutput
+    ? String(els.logsOutput.textContent || '').split('\n').filter(Boolean).slice(-150)
+    : [];
+  await chrome.storage.local.set({ extensionLogs: extLogs }).catch(() => {});
+  const qs = sessionId ? '?sessionId=' + encodeURIComponent(sessionId) : '';
+  await chrome.tabs.create({ url: chrome.runtime.getURL('debug.html' + qs) });
 }
 
 /**
@@ -4196,7 +4266,44 @@ function renderChatThreadsView() {
       metaEl.textContent = `${msgCount} msg${msgCount === 1 ? '' : 's'} · ${time}`;
     }
 
+    const recCount = (state.recordingsIndex || []).filter((r) => r.sessionId === s.id).length;
+    const errCount = (state.pageConsoleHistory || []).filter((e) => e.sessionId === s.id && e.level !== 'warn').length;
+    const totalTok = s.usage ? ((s.usage.input || 0) + (s.usage.output || 0)) : 0;
+    if (recCount || errCount || totalTok) {
+      const badges = document.createElement('span');
+      badges.className = 'thread-card__badges';
+      if (recCount) {
+        const p = document.createElement('span');
+        p.className = 'thread-pill thread-pill--rec';
+        p.textContent = `🎬 ${recCount}`;
+        badges.appendChild(p);
+      }
+      if (totalTok && DR) {
+        const p = document.createElement('span');
+        p.className = 'thread-pill';
+        p.textContent = `📊 ${DR.formatCompact(totalTok)}`;
+        badges.appendChild(p);
+      }
+      if (errCount) {
+        const p = document.createElement('span');
+        p.className = 'thread-pill thread-pill--err';
+        p.textContent = `⚠️ ${errCount}`;
+        badges.appendChild(p);
+      }
+      metaEl.appendChild(badges);
+    }
+
     info.append(titleEl, metaEl);
+
+    const debugBtn = document.createElement('button');
+    debugBtn.type = 'button';
+    debugBtn.className = 'thread-card__debug';
+    debugBtn.textContent = '🩺';
+    debugBtn.title = 'Open Debug Dashboard for this conversation';
+    debugBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openDebugDashboard(s.id);
+    });
 
     const genBtn = document.createElement('button');
     genBtn.type = 'button';
@@ -4228,7 +4335,7 @@ function renderChatThreadsView() {
 
     const actions = document.createElement('div');
     actions.className = 'thread-card__actions';
-    actions.append(genBtn, delBtn);
+    actions.append(debugBtn, genBtn, delBtn);
 
     card.append(info, actions);
     card.addEventListener('click', () => loadChatSession(s));
@@ -4336,11 +4443,26 @@ chrome.runtime.onMessage.addListener((message) => {
   }
   if (message.type === 'PAGE_LOG') {
     const entry = message.entry || {};
+    const level = entry.level === 'warn' ? 'warn' : 'error';
+    const text = String(entry.text || '');
     if (message.tabId === (sessionLog && sessionLog.tabId)) {
-      logSession(entry.level === 'warn' ? 'warn' : 'error', entry.text || '', entry.t);
+      logSession(level, text, entry.t);
     }
     if (turnWatch && message.tabId === turnWatch.tabId && turnWatch.pageErrors.length < TURN_ERRORS_MAX) {
-      turnWatch.pageErrors.push({ level: entry.level === 'warn' ? 'warn' : 'error', text: String(entry.text || '') });
+      turnWatch.pageErrors.push({ level, text });
+    }
+    if (message.tabId === state.tabId || (turnWatch && message.tabId === turnWatch.tabId)) {
+      state.pageConsoleHistory = [
+        ...(state.pageConsoleHistory || []),
+        {
+          sessionId: state.currentSessionId,
+          at: entry.t || Date.now(),
+          tabId: message.tabId,
+          level,
+          text: text.slice(0, 1500),
+        },
+      ].slice(-200);
+      chrome.storage.local.set({ pageConsoleHistory: state.pageConsoleHistory }).catch(() => {});
     }
     return;
   }
@@ -4648,10 +4770,14 @@ if (els.copilotCopyCodeBtn) {
     'webmcp_catalog_cache',
     'chatSessions',
     'agentTrace',
+    'recordingsIndex',
+    'pageConsoleHistory',
   ]);
 
   state.chatSessions = Array.isArray(stored.chatSessions) ? stored.chatSessions : [];
   state.agentTrace = Array.isArray(stored.agentTrace) ? stored.agentTrace : [];
+  state.recordingsIndex = Array.isArray(stored.recordingsIndex) ? stored.recordingsIndex : [];
+  state.pageConsoleHistory = Array.isArray(stored.pageConsoleHistory) ? stored.pageConsoleHistory : [];
   els.confirmTools.checked = Boolean(stored.confirmTools);
   state.autoSuggest = Boolean(stored.autoSuggest);
   state.limitRounds = stored.limitRounds !== false;
@@ -4764,6 +4890,14 @@ console.error = function (...args) {
   const msg = args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
   appendLog('ERROR', msg);
 };
+
+if (els.chatDebugBtn) {
+  els.chatDebugBtn.addEventListener('click', () => openDebugDashboard(state.currentSessionId));
+}
+
+if (els.openDebugDashboardBtn) {
+  els.openDebugDashboardBtn.addEventListener('click', () => openDebugDashboard(state.currentSessionId));
+}
 
 if (els.traceCopyBtn) {
   els.traceCopyBtn.addEventListener('click', async () => {
