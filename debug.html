@@ -19,6 +19,10 @@
     <div class="dbg-topbar__controls">
       <label class="sr-only" for="session-select">Conversation</label>
       <select id="session-select" class="dbg-select" aria-label="Select conversation"></select>
+      <label class="dbg-check" title="Export full tool responses and transcript without truncation">
+        <input type="checkbox" id="untrimmed-toggle" checked>
+        <span>Full (untrimmed)</span>
+      </label>
       <button id="refresh-btn" class="dbg-btn" type="button" title="Reload telemetry from storage">🔄 Refresh</button>
       <button id="copy-all-btn" class="dbg-btn dbg-btn--primary" type="button" title="Copy full Markdown debug report for an AI agent">📋 Copy Full Report (MD)</button>
       <button id="download-md-btn" class="dbg-btn" type="button" title="Download Markdown report">⬇ .md</button>
@@ -29,7 +33,7 @@
     <!-- KPI Strip -->
     <section class="dbg-kpis" aria-label="Summary metrics">
       <div class="kpi-card">
-        <div class="kpi-card__label">Provider Tokens</div>
+        <div class="kpi-card__label">Context Window (ctx)</div>
         <div id="kpi-tokens" class="kpi-card__value">—</div>
         <div id="kpi-tokens-sub" class="kpi-card__sub">—</div>
       </div>
@@ -58,7 +62,7 @@
     <!-- Token Footprint & WebMCP Optimization Signals -->
     <section class="dbg-card" aria-label="Token footprint breakdown">
       <div class="dbg-card__head">
-        <h2>Prompt Token Footprint &amp; WebMCP Optimization Signals</h2>
+        <h2>Latest Context Footprint (<code>ctx</code>) &amp; WebMCP Signals</h2>
         <button id="copy-tokens-btn" class="dbg-btn dbg-btn--sm" type="button">📋 Copy Breakdown</button>
       </div>
       <div id="token-bar" class="token-bar" aria-label="Stacked prompt token bar"></div>

@@ -2739,7 +2739,7 @@ async function runToolCall(call, signal) {
         note,
         ms: typeof ms === 'number' ? Math.round(ms) : undefined,
         args,
-        output: String(output || '').slice(0, 1500),
+        output: String(output || '').slice(0, 25000),
       });
     }
     const entry = SL.toolEntry({ name: String(name || '(unnamed)'), args, ok, output, ms, note });
@@ -3420,13 +3420,15 @@ function catalogChars() {
 function recordTrace(watch, report, end) {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
+  const userPrompt = lastUserRequest();
   state.agentTrace = AT.appendTurn(state.agentTrace, {
     sessionId: state.currentSessionId,
     tabUrl: state.tabUrl || '',
     at: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`,
     model: state.model,
-    goal: currentGoal || lastUserRequest(),
-    request: lastUserRequest(),
+    userPrompt,
+    goal: currentGoal || userPrompt,
+    request: userPrompt,
     end,
     verdict: report.level + ' "' + report.title + '"',
     nudges: watch.nudges,
@@ -3436,7 +3438,10 @@ function recordTrace(watch, report, end) {
     errors: watch.pageErrors.slice(0, TURN_ERRORS_MAX),
     rounds: watch.rounds,
   });
-  chrome.storage.local.set({ agentTrace: state.agentTrace }).catch(() => {});
+  chrome.storage.local.set({
+    agentTrace: state.agentTrace,
+    extensionLogs: extensionLogEntries.slice(-300),
+  }).catch(() => {});
 }
 
 async function runAgentLoop(signal) {
@@ -3947,10 +3952,7 @@ function renderChatHeader() {
 
 async function openDebugDashboard(sessionId) {
   saveCurrentChatSession();
-  const extLogs = els.logsOutput
-    ? String(els.logsOutput.textContent || '').split('\n').filter(Boolean).slice(-150)
-    : [];
-  await chrome.storage.local.set({ extensionLogs: extLogs }).catch(() => {});
+  await chrome.storage.local.set({ extensionLogs: extensionLogEntries.slice(-300) }).catch(() => {});
   const qs = sessionId ? '?sessionId=' + encodeURIComponent(sessionId) : '';
   await chrome.tabs.create({ url: chrome.runtime.getURL('debug.html' + qs) });
 }
@@ -4857,12 +4859,20 @@ if (els.copilotCopyCodeBtn) {
 // --- Logs & Debug System ---------------------------------------------------
 
 const logLines = [];
+const extensionLogEntries = [];
 
 function appendLog(type, message) {
-  const time = new Date().toLocaleTimeString();
+  const now = Date.now();
+  const time = new Date(now).toLocaleTimeString();
   const line = `[${time}] [${type}] ${message}\n`;
   logLines.push(line);
   if (logLines.length > 300) logLines.shift();
+  extensionLogEntries.push({
+    sessionId: state.currentSessionId || null,
+    at: now,
+    line: line.trimEnd(),
+  });
+  if (extensionLogEntries.length > 400) extensionLogEntries.shift();
   if (els.logsOutput) {
     els.logsOutput.textContent = logLines.join('');
     els.logsOutput.scrollTop = els.logsOutput.scrollHeight;
@@ -4928,6 +4938,8 @@ if (els.logsCopyBtn) {
 if (els.logsClearBtn) {
   els.logsClearBtn.addEventListener('click', () => {
     logLines.length = 0;
+    extensionLogEntries.length = 0;
     if (els.logsOutput) els.logsOutput.textContent = 'Logs cleared.\n';
+    chrome.storage.local.set({ extensionLogs: [] }).catch(() => {});
   });
 }

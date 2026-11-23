@@ -15,6 +15,7 @@
   const els = {
     subtitle: document.getElementById('dbg-subtitle'),
     sessionSelect: document.getElementById('session-select'),
+    untrimmedToggle: document.getElementById('untrimmed-toggle'),
     refreshBtn: document.getElementById('refresh-btn'),
     copyAllBtn: document.getElementById('copy-all-btn'),
     downloadMdBtn: document.getElementById('download-md-btn'),
@@ -108,7 +109,11 @@
       }
     }
 
-    return { session, turns, consoleLogs, recordings, toolCalls };
+    const extensionLogs = filterBySession
+      ? store.extensionLogs.filter((entry) => entry && typeof entry === 'object' && entry.sessionId === selectedSessionId)
+      : store.extensionLogs;
+
+    return { session, turns, consoleLogs, recordings, toolCalls, extensionLogs };
   }
 
   function renderSessionSelect() {
@@ -148,7 +153,7 @@
   }
 
   function renderKpisAndTokens(data) {
-    const { summary, drivers, hints } = DR.topTokenDrivers(data.turns);
+    const { summary, ctxDrivers, drivers, hints } = DR.topTokenDrivers(data.turns);
     const { session, consoleLogs, recordings, toolCalls } = data;
 
     if (els.subtitle) {
@@ -157,12 +162,16 @@
         : 'Showing telemetry across all tracked turns';
     }
 
-    els.kpiTokens.textContent = summary.hasUsage
-      ? `${DR.formatCompact(summary.input + summary.output)}`
-      : `~${DR.formatCompact(summary.partsTotal)}`;
+    const ctxPrimary = summary.hasUsage
+      ? DR.formatCompact(summary.lastInput || summary.peakInput)
+      : `~${DR.formatCompact(summary.lastPartsTotal)}`;
+    const peakNote = summary.hasUsage && summary.peakInput && summary.peakInput !== summary.lastInput
+      ? ` (peak ${DR.formatCompact(summary.peakInput)})`
+      : '';
+    els.kpiTokens.textContent = `${ctxPrimary}${peakNote}`;
     els.kpiTokensSub.textContent = summary.hasUsage
-      ? `in ${DR.formatCompact(summary.input)}${summary.cached ? ` (${DR.formatCompact(summary.cached)} cached)` : ''} · out ${DR.formatCompact(summary.output)}`
-      : 'Estimated (~4 chars/token)';
+      ? `cumulative (${summary.roundsCount} calls): in ${DR.formatCompact(summary.input)}${summary.cached ? ` (${DR.formatCompact(summary.cached)} cached)` : ''} · out ${DR.formatCompact(summary.output)}`
+      : `cumulative est. (${summary.roundsCount} calls): ~${DR.formatCompact(summary.partsTotal)}`;
 
     els.kpiTurns.textContent = `${summary.turnsCount} / ${summary.roundsCount}`;
     els.kpiTurnsSub.textContent = `${(summary.ms / 1000).toFixed(1)}s model time · ${summary.nudges} nudge(s)`;
@@ -180,15 +189,17 @@
     const totalBytes = recordings.reduce((acc, r) => acc + (r.sizeBytes || 0), 0);
     els.kpiRecsSub.textContent = totalBytes ? `${Math.round(totalBytes / 1024)} KB total` : 'No video files linked';
 
-    // Stacked bar
+    // Stacked bar using latest context (ctx) footprint when available
     els.tokenBar.textContent = '';
     els.tokenLegend.textContent = '';
+    const basisDrivers = summary.lastPartsTotal > 0 ? ctxDrivers : drivers;
+    const basisTotal = summary.lastPartsTotal > 0 ? summary.lastPartsTotal : summary.partsTotal;
     const colors = { sys: '#64748b', cat: '#8b5cf6', tools: '#3b82f6', hist: '#10b981', res: '#f59e0b' };
-    for (const d of drivers) {
-      if (d.tokens > 0 && summary.partsTotal > 0) {
+    for (const d of basisDrivers) {
+      if (d.tokens > 0 && basisTotal > 0) {
         const seg = document.createElement('div');
         seg.className = `token-seg token-seg--${d.key}`;
-        seg.style.width = `${Math.max(1, (d.tokens / summary.partsTotal) * 100)}%`;
+        seg.style.width = `${Math.max(1, (d.tokens / basisTotal) * 100)}%`;
         seg.title = `${d.label}: ~${DR.formatCompact(d.tokens)} tokens (${d.pct}%)`;
         els.tokenBar.appendChild(seg);
       }
@@ -225,14 +236,22 @@
 
       const head = document.createElement('div');
       head.className = 'turn-card__head';
+      const userPrompt = t.userPrompt || t.request || '(no user prompt)';
       const goal = document.createElement('div');
       goal.className = 'turn-card__goal';
-      goal.textContent = `#${t.n || '?'} · ${t.goal || t.request || '(no goal)'}`;
+      goal.textContent = `#${t.n || '?'} · ${userPrompt}`;
       const meta = document.createElement('div');
       meta.className = 'turn-card__meta';
       meta.textContent = `${t.at || ''} · ${t.model || ''} · ${t.verdict || t.end || '?'} · ${t.nudges || 0} nudge(s)`;
       head.append(goal, meta);
       card.appendChild(head);
+
+      if (t.goal && t.goal !== userPrompt) {
+        const sub = document.createElement('div');
+        sub.className = 'turn-card__subgoal';
+        sub.textContent = `Last agent step: ${t.goal}`;
+        card.appendChild(sub);
+      }
 
       for (let i = 0; i < (t.rounds || []).length; i++) {
         const r = t.rounds[i];
@@ -293,11 +312,25 @@
       tdArgs.appendChild(codeArgs);
 
       const tdRes = document.createElement('td');
-      const codeRes = document.createElement('code');
       const out = String(tc.output || '');
-      codeRes.textContent = out.length > 260 ? out.slice(0, 260) + `… (${out.length} chars)` : out;
-      codeRes.title = out;
-      tdRes.appendChild(codeRes);
+      if (out.length > 260) {
+        const det = document.createElement('details');
+        det.className = 'dbg-payload-details';
+        const sum = document.createElement('summary');
+        sum.textContent = out.slice(0, 180) + `… (${out.length} chars — expand)`;
+        const pre = document.createElement('pre');
+        try {
+          pre.textContent = out.trim().startsWith('{') ? JSON.stringify(JSON.parse(out), null, 2) : out;
+        } catch (_) {
+          pre.textContent = out;
+        }
+        det.append(sum, pre);
+        tdRes.appendChild(det);
+      } else {
+        const codeRes = document.createElement('code');
+        codeRes.textContent = out;
+        tdRes.appendChild(codeRes);
+      }
 
       tr.append(tdTurn, tdName, tdStatus, tdMs, tdArgs, tdRes);
       tbody.appendChild(tr);
@@ -323,9 +356,10 @@
       }
     }
 
-    els.extLogsPre.textContent = store.extensionLogs.length
-      ? store.extensionLogs.join('\n')
-      : '(No extension diagnostic logs cached yet.)';
+    const formattedExtLogs = (data.extensionLogs || []).map((e) => (typeof e === 'string' ? e : (e && e.line) || ''));
+    els.extLogsPre.textContent = formattedExtLogs.length
+      ? formattedExtLogs.join('\n')
+      : '(No extension diagnostic logs recorded for this conversation.)';
   }
 
   async function selectRecording(rec) {
@@ -449,12 +483,14 @@
       return;
     }
 
+    const nameById = DR.resolveToolCallNames(msgs);
     for (const m of msgs) {
       const row = document.createElement('div');
       row.className = 'msg-row';
       const role = document.createElement('div');
       role.className = 'msg-row__role';
-      role.textContent = m.role === 'tool' ? `TOOL (${m.name || 'tool'})` : m.role.toUpperCase();
+      const toolName = m.name || (m.tool_call_id && nameById[m.tool_call_id]) || 'tool';
+      role.textContent = m.role === 'tool' ? `TOOL (${toolName})` : m.role.toUpperCase();
       const body = document.createElement('div');
       body.className = 'msg-row__body';
       if (m.role === 'assistant' && !m.content && Array.isArray(m.tool_calls)) {
@@ -522,13 +558,15 @@
 
   els.copyAllBtn.addEventListener('click', () => {
     const data = currentViewData();
-    const md = DR.formatDebugMarkdown({ ...data, extensionLogs: store.extensionLogs });
+    const untrimmed = Boolean(els.untrimmedToggle && els.untrimmedToggle.checked);
+    const md = DR.formatDebugMarkdown({ ...data, untrimmed });
     copyText(md, els.copyAllBtn);
   });
 
   els.downloadMdBtn.addEventListener('click', () => {
     const data = currentViewData();
-    const md = DR.formatDebugMarkdown({ ...data, extensionLogs: store.extensionLogs });
+    const untrimmed = Boolean(els.untrimmedToggle && els.untrimmedToggle.checked);
+    const md = DR.formatDebugMarkdown({ ...data, untrimmed });
     const blob = new Blob([md], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -539,9 +577,13 @@
   });
 
   els.copyTokensBtn.addEventListener('click', () => {
-    const { summary, drivers, hints } = DR.topTokenDrivers(currentViewData().turns);
+    const { summary, ctxDrivers, drivers, hints } = DR.topTokenDrivers(currentViewData().turns);
     const txt = [
-      `Tokens: in ${summary.input} (cached ${summary.cached}), out ${summary.output}`,
+      `Context (ctx): latest ${summary.lastInput || summary.peakInput}, peak ${summary.peakInput}`,
+      `Cumulative (${summary.roundsCount} calls): in ${summary.input} (cached ${summary.cached}), out ${summary.output}`,
+      ...(summary.lastPartsTotal ? ['', 'Latest context breakdown:', ...ctxDrivers.map((d) => `- ${d.label}: ~${d.tokens} (${d.pct}%)`)] : []),
+      '',
+      'Cumulative breakdown:',
       ...drivers.map((d) => `- ${d.label}: ~${d.tokens} (${d.pct}%)`),
       ...(hints.length ? ['', 'Optimization signals:', ...hints.map((h) => '- ' + h)] : []),
     ].join('\n');

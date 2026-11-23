@@ -43,21 +43,25 @@ test('summarizeSessionTokens and topTokenDrivers highlight heavy prompt componen
     },
   ];
 
-  const { summary, drivers, hints } = DR.topTokenDrivers(turns);
+  const { summary, ctxDrivers, drivers, hints } = DR.topTokenDrivers(turns);
   assert.strictEqual(summary.turnsCount, 1);
   assert.strictEqual(summary.roundsCount, 2);
   assert.strictEqual(summary.input, 4500);
+  assert.strictEqual(summary.peakInput, 2500);
+  assert.strictEqual(summary.lastInput, 2500);
   assert.strictEqual(summary.cached, 1500);
   assert.strictEqual(summary.output, 250);
   assert.strictEqual(summary.nudges, 2);
   assert.strictEqual(summary.pageErrors, 1);
   assert.strictEqual(drivers[0].key, 'tools');
+  assert.strictEqual(ctxDrivers[0].key, 'tools');
   assert.ok(hints.some((h) => h.includes('WebMCP tool schemas')));
   assert.ok(hints.some((h) => h.includes('2 nudge(s)')));
   assert.ok(hints.some((h) => h.includes('1 page console error(s)')));
 });
 
-test('formatDebugMarkdown produces complete agent-ready Markdown report', () => {
+test('formatDebugMarkdown produces complete agent-ready Markdown report with tool name resolution and untrimmed mode', () => {
+  const longOut = 'X'.repeat(5000);
   const md = DR.formatDebugMarkdown({
     session: {
       id: 'session-1',
@@ -66,6 +70,8 @@ test('formatDebugMarkdown produces complete agent-ready Markdown report', () => 
       url: 'https://example.com/book',
       messages: [
         { role: 'user', content: 'Book Paris hotel' },
+        { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', function: { name: 'inspect_view' } }] },
+        { role: 'tool', tool_call_id: 'call_1', content: longOut },
         { role: 'assistant', content: 'Booked!' },
       ],
     },
@@ -74,7 +80,8 @@ test('formatDebugMarkdown produces complete agent-ready Markdown report', () => 
         n: 1,
         at: '2026-11-20 10:00',
         model: 'ollama:qwen3',
-        goal: 'Book Paris hotel',
+        userPrompt: 'Book Paris hotel',
+        goal: 'Running inspect_view...',
         verdict: 'ok "Done"',
         nudges: 0,
         tools: 1,
@@ -83,7 +90,7 @@ test('formatDebugMarkdown produces complete agent-ready Markdown report', () => 
           { ms: 900, usage: { input: 1000, output: 50 }, parts: { sys: 300, cat: 0, tools: 500, hist: 100, res: 100 }, reply: 'tools: book' },
         ],
         toolCalls: [
-          { name: 'book', ok: true, ms: 120, args: { city: 'Paris' }, output: '{"ok":true}' },
+          { name: 'book', ok: true, ms: 120, args: { city: 'Paris' }, output: longOut },
         ],
       },
     ],
@@ -93,18 +100,17 @@ test('formatDebugMarkdown produces complete agent-ready Markdown report', () => 
     recordings: [
       { stem: '2026-clip', storage: 'folder', durationMs: 4200, sizeBytes: 51200, logText: '[+0.1s] [tool] book' },
     ],
-    extensionLogs: ['[INFO] Extension ready'],
+    extensionLogs: [{ sessionId: 'session-1', at: 1700000000000, line: '[INFO] Extension ready' }],
+    untrimmed: true,
   });
 
   assert.ok(md.includes('# WebMCP Debug Report: Hotel booking test'));
-  assert.ok(md.includes('## 1. Summary & Token Footprint'));
-  assert.ok(md.includes('## 2. Goals, Turns & Tool Calls'));
-  assert.ok(md.includes('`book` -> **OK** (120ms)'));
-  assert.ok(md.includes('## 3. Page Console Errors & Warnings'));
-  assert.ok(md.includes('Uncaught TypeError: x is null'));
-  assert.ok(md.includes('## 4. Linked Recordings'));
-  assert.ok(md.includes('2026-clip.webm'));
-  assert.ok(md.includes('## 5. Conversation Transcript'));
-  assert.ok(md.includes('Book Paris hotel'));
-  assert.ok(md.includes('## 6. Extension Logs (recent)'));
+  assert.ok(md.includes('Context Window (`ctx`)'));
+  assert.ok(md.includes('Cumulative Billed (1 calls)'));
+  assert.ok(md.includes('**User Prompt**: Book Paris hotel'));
+  assert.ok(md.includes('**Last Agent Goal**: Running inspect_view...'));
+  assert.ok(md.includes('Tool result (`inspect_view`)'));
+  assert.ok(md.includes(longOut));
+  assert.ok(!md.includes('[truncated'));
+  assert.ok(md.includes('## 6. Extension Logs (session)'));
 });

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.2
+
+- **Contexto real (`ctx`) vs consumo acumulado en Debug.** La tarjeta de tokens y el desglose
+  del prompt distinguen ahora el tamaño real de la ventana de contexto de la última/mayor
+  llamada (`ctx` / `peak`) frente al total acumulado entre rondas.
+- **Payloads completos sin recorte.** Se amplía la captura de resultados de tools a 25.000
+  caracteres, se añade un toggle *Full (untrimmed)* para copiar el reporte Markdown íntegro y
+  desplegables inline en la tabla de *Tool Calls*.
+- **Trazabilidad limpia por conversación.** Cada turno conserva por separado el prompt real del
+  usuario y el último paso del agente; el transcript resuelve el nombre real de cada tool por
+  `tool_call_id` y los *Extension Logs* se filtran por `sessionId`.
+
 ## 0.8.1
 
 - **Dashboard de Debug de Conversación (`debug.html`).** Nueva vista independiente en pestaña
