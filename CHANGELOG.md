@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.3
+
+- **Aviso de nueva release disponible.** La extensión comprueba de forma cacheada (cada 6 horas)
+  la última release publicada en GitHub (`releases/latest`) y muestra un banner discreto bajo
+  la barra superior cuando hay una versión superior, con descarga directa del `.zip` y enlace a
+  las notas de la release.
+- **Control en Settings.** Nueva tarjeta *Extension Updates* con la versión instalada, estado de
+  actualización y botón *Check now*.
+
 ## 0.8.2
 
 - **Contexto real (`ctx`) vs consumo acumulado en Debug.** La tarjeta de tokens y el desglose

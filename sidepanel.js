@@ -229,6 +229,16 @@ const els = {
   openDebugDashboardBtn: document.getElementById('open-debug-dashboard-btn'),
   logsClearBtn: document.getElementById('logs-clear-btn'),
   chatDebugBtn: document.getElementById('chat-debug-btn'),
+  // updates
+  updateBanner: document.getElementById('update-banner'),
+  updateBannerText: document.getElementById('update-banner-text'),
+  updateDownloadLink: document.getElementById('update-download-link'),
+  updateReleaseLink: document.getElementById('update-release-link'),
+  updateDismissBtn: document.getElementById('update-dismiss-btn'),
+  appVersionLabel: document.getElementById('app-version-label'),
+  updateStatusText: document.getElementById('update-status-text'),
+  updateSettingsLink: document.getElementById('update-settings-link'),
+  updateCheckBtn: document.getElementById('update-check-btn'),
   // tools
   toolsList: document.getElementById('tools-list'),
   toolsEmpty: document.getElementById('tools-empty'),
@@ -305,6 +315,8 @@ const state = {
   agentTrace: [],
   recordingsIndex: [],
   pageConsoleHistory: [],
+  updateCheckCache: null,
+  dismissedUpdateVersion: '',
   copilotModels: [],
   copilotDeviceCode: null,
   copilotDeviceExpiresAt: 0,
@@ -388,6 +400,7 @@ const U = globalThis.__WebMCPTokenUsage;
 const TR = globalThis.__WebMCPTurnReport;
 const AT = globalThis.__WebMCPAgentTrace;
 const DR = globalThis.__WebMCPDebugReport;
+const UC = globalThis.__WebMCPUpdateCheck;
 const R = globalThis.__WebMCPRecorder;
 const tokens = S.tokens;
 const humanize = S.humanize;
@@ -4774,12 +4787,16 @@ if (els.copilotCopyCodeBtn) {
     'agentTrace',
     'recordingsIndex',
     'pageConsoleHistory',
+    'updateCheckCache',
+    'dismissedUpdateVersion',
   ]);
 
   state.chatSessions = Array.isArray(stored.chatSessions) ? stored.chatSessions : [];
   state.agentTrace = Array.isArray(stored.agentTrace) ? stored.agentTrace : [];
   state.recordingsIndex = Array.isArray(stored.recordingsIndex) ? stored.recordingsIndex : [];
   state.pageConsoleHistory = Array.isArray(stored.pageConsoleHistory) ? stored.pageConsoleHistory : [];
+  state.updateCheckCache = stored.updateCheckCache || null;
+  state.dismissedUpdateVersion = stored.dismissedUpdateVersion || '';
   els.confirmTools.checked = Boolean(stored.confirmTools);
   state.autoSuggest = Boolean(stored.autoSuggest);
   state.limitRounds = stored.limitRounds !== false;
@@ -4853,8 +4870,110 @@ if (els.copilotCopyCodeBtn) {
   await loadHistory();
   await fetchLocalModels();
   await detectPageTools();
+  renderUpdateUi();
+  checkForUpdates({ force: false });
   els.input.focus();
 })();
+
+// --- Extension Release Update Checker ---------------------------------------
+
+function currentManifestVersion() {
+  try {
+    return (chrome.runtime && chrome.runtime.getManifest && chrome.runtime.getManifest().version) || '0.0.0';
+  } catch (_) {
+    return '0.0.0';
+  }
+}
+
+function renderUpdateUi(errorMessage = '') {
+  if (!UC) return;
+  const current = currentManifestVersion();
+  if (els.appVersionLabel) els.appVersionLabel.textContent = 'v' + current;
+
+  const cache = state.updateCheckCache;
+  const latest = cache && cache.latest ? cache.latest : null;
+  const available = Boolean(latest && UC.isNewerVersion(latest.version, current));
+
+  if (els.updateBanner) {
+    const dismissed = Boolean(latest && state.dismissedUpdateVersion === latest.version);
+    els.updateBanner.hidden = !available || dismissed;
+    if (available && !dismissed && latest) {
+      els.updateBannerText.textContent = `⬆ Update available: v${latest.version} (you have v${current})`;
+      if (els.updateDownloadLink) {
+        els.updateDownloadLink.href = latest.zipUrl || latest.htmlUrl || UC.RELEASES_PAGE_URL;
+        els.updateDownloadLink.hidden = false;
+      }
+      if (els.updateReleaseLink) {
+        els.updateReleaseLink.href = latest.htmlUrl || UC.RELEASES_PAGE_URL;
+      }
+    }
+  }
+
+  if (els.updateStatusText) {
+    if (errorMessage) {
+      els.updateStatusText.textContent = 'Check failed: ' + errorMessage;
+    } else if (available && latest) {
+      els.updateStatusText.textContent = `Update available: v${latest.version} (unzip & Reload in chrome://extensions)`;
+    } else if (cache && cache.checkedAt) {
+      const when = new Date(cache.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      els.updateStatusText.textContent = `Up to date (v${current}) · checked ${when}`;
+    } else {
+      els.updateStatusText.textContent = `Installed: v${current}`;
+    }
+  }
+
+  if (els.updateSettingsLink) {
+    els.updateSettingsLink.hidden = !available || !latest;
+    if (available && latest) {
+      els.updateSettingsLink.href = latest.zipUrl || latest.htmlUrl || UC.RELEASES_PAGE_URL;
+      els.updateSettingsLink.textContent = `⬇ v${latest.version} (.zip)`;
+    }
+  }
+}
+
+async function checkForUpdates({ force = false } = {}) {
+  if (!UC) return;
+  const now = Date.now();
+  if (!UC.shouldFetchUpdate(state.updateCheckCache, now, force)) {
+    renderUpdateUi();
+    return;
+  }
+  if (force && els.updateCheckBtn) {
+    els.updateCheckBtn.disabled = true;
+    els.updateCheckBtn.textContent = 'Checking…';
+  }
+  try {
+    const res = await UC.checkLatestRelease(fetch, currentManifestVersion());
+    if (res.ok && res.latest) {
+      state.updateCheckCache = { checkedAt: Date.now(), latest: res.latest };
+      await chrome.storage.local.set({ updateCheckCache: state.updateCheckCache }).catch(() => {});
+      renderUpdateUi();
+    } else if (force) {
+      renderUpdateUi(res.error || 'Unknown error');
+    } else {
+      renderUpdateUi();
+    }
+  } finally {
+    if (force && els.updateCheckBtn) {
+      els.updateCheckBtn.disabled = false;
+      els.updateCheckBtn.textContent = '🔄 Check now';
+    }
+  }
+}
+
+if (els.updateCheckBtn) {
+  els.updateCheckBtn.addEventListener('click', () => checkForUpdates({ force: true }));
+}
+
+if (els.updateDismissBtn) {
+  els.updateDismissBtn.addEventListener('click', async () => {
+    const latest = state.updateCheckCache && state.updateCheckCache.latest;
+    if (!latest) return;
+    state.dismissedUpdateVersion = latest.version;
+    await chrome.storage.local.set({ dismissedUpdateVersion: latest.version }).catch(() => {});
+    renderUpdateUi();
+  });
+}
 
 // --- Logs & Debug System ---------------------------------------------------
 

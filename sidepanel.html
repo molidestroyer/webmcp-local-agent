@@ -43,6 +43,14 @@
     </div>
 
     <div id="status" class="status" hidden></div>
+    <div id="update-banner" class="update-banner" hidden>
+      <span id="update-banner-text" class="update-banner__text"></span>
+      <div class="update-banner__actions">
+        <a id="update-download-link" class="update-banner__link" target="_blank" rel="noopener noreferrer" title="Download the release zip, unzip, and click Reload in chrome://extensions">⬇ Zip</a>
+        <a id="update-release-link" class="update-banner__link" target="_blank" rel="noopener noreferrer" title="Open release notes on GitHub">Notes</a>
+        <button id="update-dismiss-btn" class="update-banner__close" type="button" title="Dismiss until the next release">✕</button>
+      </div>
+    </div>
   </header>
 
   <nav class="tabs" role="tablist">
@@ -555,6 +563,21 @@
           <div id="copilot-error-msg" class="setting-error" hidden></div>
         </div>
       </div>
+
+      <!-- Group 5: Extension Version & Updates -->
+      <div class="setting-card">
+        <div class="field-label field-label--row">
+          <span>Extension Updates</span>
+          <span id="app-version-label" class="hint">v0.8.3</span>
+        </div>
+        <div class="update-settings-row">
+          <span id="update-status-text" class="hint">Checking GitHub releases…</span>
+          <div class="update-settings-actions">
+            <a id="update-settings-link" class="btn-small update-settings-link" target="_blank" rel="noopener noreferrer" hidden>⬇ Download</a>
+            <button id="update-check-btn" class="btn-small" type="button">🔄 Check now</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- --------------------------------------------------------------- Logs -->
@@ -634,6 +657,7 @@
   <script src="lib/turn-report.js"></script>
   <script src="lib/agent-trace.js"></script>
   <script src="lib/debug-report.js"></script>
+  <script src="lib/update-check.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

@@ -55,7 +55,7 @@ Write-Host "WebMCP Local Agent v$version" -ForegroundColor Cyan
 if (-not $SkipChecks) {
   $node = Get-Command node -ErrorAction SilentlyContinue
   if ($node) {
-    foreach ($file in @('background.js', 'content.js', 'page-hook.js', 'sidepanel.js', 'debug.js', 'lib/webmcp-schema.js', 'lib/catalog-service.js', 'lib/copilot-service.js', 'lib/token-usage.js', 'lib/turn-report.js', 'lib/agent-trace.js', 'lib/debug-report.js')) {
+    foreach ($file in @('background.js', 'content.js', 'page-hook.js', 'sidepanel.js', 'debug.js', 'lib/webmcp-schema.js', 'lib/catalog-service.js', 'lib/copilot-service.js', 'lib/token-usage.js', 'lib/turn-report.js', 'lib/agent-trace.js', 'lib/debug-report.js', 'lib/update-check.js')) {
       & node --check (Join-Path $root $file)
       if ($LASTEXITCODE -ne 0) { throw "Syntax error in $file" }
     }
